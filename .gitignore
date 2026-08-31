@@ -1,0 +1,13 @@
+# Real device inventory stays local - only the example is committed.
+inventory/*.yml
+!inventory/*.example.yml
+
+# Collected evidence and generated reports.
+reports/*
+!reports/.gitkeep
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

@@ -1,0 +1,59 @@
+# Device inventory - EXAMPLE FILE
+#
+# Copy this file to inventory/devices.yml and replace the hosts with
+# your own management IPs or hostnames. devices.yml is gitignored so
+# real device addresses never end up in the repository.
+#
+# Each platform entry:
+#   name:        friendly label, used only for messages
+#   device_type: netmiko driver name (arista_eos, paloalto_panos,
+#                cisco_ios, ...). See netmiko's supported platforms.
+#   hosts:       management IPs/hostnames reached over SSH
+#   commands:    the show commands captured for that platform, in order
+#
+# All commands should be read-only "show"-style commands. The one
+# exception below is PAN-OS "set cli config-output-format set", which
+# only changes how the running config is DISPLAYED (as set commands,
+# which diff far better than the default XML-ish tree) - it does not
+# modify the device.
+
+platforms:
+  - name: arista
+    device_type: arista_eos
+    hosts:
+      - 192.0.2.11
+      - 192.0.2.12
+      - 192.0.2.13
+    commands:
+      - show mlag config-sanity
+      - show ip interface brief
+      - show vlan brief
+      - show mac address-table
+      - show ip arp
+      - show interfaces status
+      - show interfaces trunk
+      - show port-channel summary
+      - show interfaces transceiver
+      - show lldp neighbors
+      - show ip ospf neighbor
+      - show ip ospf interface
+      - show ip route ospf
+      - show ip bgp summary
+      - show ip route
+      - show ip bgp
+      - show running-config
+      - show version
+
+  - name: paloalto
+    device_type: paloalto_panos
+    hosts:
+      - 192.0.2.21
+      - 192.0.2.22
+    commands:
+      - show system info
+      - show high-availability state
+      - show routing route
+      - show routing protocol bgp peer
+      - show routing protocol ospf neighbor
+      - set cli config-output-format set
+      - show config running
