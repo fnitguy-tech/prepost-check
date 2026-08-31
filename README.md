@@ -9,6 +9,8 @@ everyone else.
 Built for mixed Arista EOS + Palo Alto PAN-OS environments; any
 platform netmiko can SSH to works by adding an inventory entry.
 
+![Report overview - health verdict, outcome summary, attention items](docs/img/report-overview.png)
+
 ## Why this exists
 
 "Did the maintenance break anything?" is usually answered by eyeballing
@@ -53,6 +55,16 @@ The HTML report is a single self-contained file: overall health verdict
 (`Stable / Changed / Attention / Action Required`), per-device impact
 scores, findings with before/after state, category and impact charts,
 and every raw diff behind a collapsible section for evidence.
+
+![Interpreted BGP findings with impact ratings and before/after state](docs/img/report-findings.png)
+
+![Health, category, and per-device impact charts](docs/img/report-charts.png)
+
+**See it for yourself:** [`docs/sample-report.html`](docs/sample-report.html)
+is a complete sample report for a 10-device maintenance window (download
+the raw file and open it in a browser - GitHub doesn't render repo HTML).
+All hostnames, addresses, ASNs, and identifiers in it are fictional, and
+the bulk routing-table evidence is truncated for size.
 
 ## Getting started
 
@@ -114,6 +126,7 @@ modules/
 inventory/          devices.example.yml (copy to devices.yml, gitignored)
 reports/            generated evidence, gitignored
 tests/              pytest suite (no device access needed)
+docs/               ARCHITECTURE.md (design decisions), sample report + screenshots
 ```
 
 ## Tests and lint
@@ -121,6 +134,7 @@ tests/              pytest suite (no device access needed)
 ```bash
 python3 -m pytest tests/    # 22 tests, all offline - synthetic capture files
 ruff check .
+yamllint .                  # .yamllint config is checked in
 ```
 
 The test suite covers the normalization rules, BGP summary parsing,
