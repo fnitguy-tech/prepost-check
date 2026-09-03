@@ -181,10 +181,14 @@ docs/               ARCHITECTURE.md (design decisions), sample report + screensh
 ## Tests and lint
 
 ```bash
+pip install -r requirements-dev.txt
 python3 -m pytest tests/    # 22 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same three commands on Python 3.12
+and the test suite alone on 3.10, the documented floor.
 
 The test suite covers the normalization rules, BGP summary parsing,
 finding classification, and both report generators end-to-end against

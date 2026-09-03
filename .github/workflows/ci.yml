@@ -8,17 +8,26 @@ on:
   pull_request:
 
 jobs:
-  test:
+  # Proves the documented Python floor: runtime deps + tests only, since the
+  # pinned dev tools may not publish wheels for older interpreters.
+  test-floor:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: pip install -r requirements.txt ruff yamllint
+          python-version: "3.10"
+      - run: pip install -r requirements.txt pytest
+      - run: python3 -m pytest tests/ -q
+
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: yamllint .
       - run: python3 -m pytest tests/ -q

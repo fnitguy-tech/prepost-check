@@ -1,8 +1,4 @@
-# Runtime
+# Runtime (Python 3.10+, the floor netmiko 4.7 sets)
 netmiko==4.7.0
 rich==15.0.0
 PyYAML==6.0.3
-
-# Development (tests + lint)
-pytest==9.1.1
-ruff==0.16.5
