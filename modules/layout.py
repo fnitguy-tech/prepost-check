@@ -32,6 +32,11 @@ def ticket_dirs(ticket):
     }
 
 
+def display_path(path):
+    """Repo-relative form of a path for console output and report headers."""
+    return os.path.relpath(path, REPO_ROOT)
+
+
 def timestamp():
     """One timestamp format everywhere, sortable as a plain string."""
     return datetime.now().strftime("%Y-%m-%d_%H-%M")

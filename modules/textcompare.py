@@ -17,7 +17,7 @@ import difflib
 import os
 import re
 
-from modules.layout import find_latest_folder
+from modules.layout import display_path, find_latest_folder
 
 # Commands whose output is captured for evidence but is too volatile to
 # ever diff meaningfully (per-lane optics readings drift constantly).
@@ -215,8 +215,8 @@ def write_compare_report(ticket, dirs, run_timestamp, console):
         report.write("Pre/Post Maintenance Comparison Report\n")
         report.write("=" * 80 + "\n\n")
         report.write(f"Ticket:           {ticket}\n")
-        report.write(f"Precheck Folder:  {precheck_folder}\n")
-        report.write(f"Postcheck Folder: {postcheck_folder}\n\n")
+        report.write(f"Precheck Folder:  {display_path(precheck_folder)}\n")
+        report.write(f"Postcheck Folder: {display_path(postcheck_folder)}\n\n")
 
         report.write("File Summary\n")
         report.write("-" * 80 + "\n")
@@ -276,6 +276,6 @@ def write_compare_report(ticket, dirs, run_timestamp, console):
             if not device_changed:
                 report.write("\nNo meaningful changes detected.\n")
 
-    console.print(f"Compare report created: {compare_file}")
+    console.print(f"Compare report created: {display_path(compare_file)}")
 
     return compare_file

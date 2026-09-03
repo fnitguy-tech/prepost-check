@@ -1,5 +1,7 @@
 # prepost-check
 
+[![ci](https://github.com/fnitguy-tech/prepost-check/actions/workflows/ci.yml/badge.svg)](https://github.com/fnitguy-tech/prepost-check/actions/workflows/ci.yml)
+
 Pre/post change validation for network maintenance windows. Capture
 device state before the change, capture it again after, and turn the
 difference into evidence you can attach to the ticket: a quick text
@@ -35,7 +37,32 @@ SITE-A-SW-1    Attention 1 · Action Required 0 · Impact 31
 Every finding links to the raw before/after diff behind it. All hostnames,
 addresses, and ASNs in the sample are fictional.
 
-## Try it
+## Try it in 60 seconds, no devices
+
+A fictional four-device uplink migration ships in `docs/demo/`
+([scenario](docs/demo/NET-DEMO/SCENARIO.md)). One command runs the whole
+compare pipeline on it:
+
+```bash
+git clone https://github.com/fnitguy-tech/prepost-check.git && cd prepost-check
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+python3 scripts/demo.py
+```
+
+![Terminal: demo run writing the text diff and the HTML report](docs/img/demo-terminal.png)
+
+Open `reports/NET-DEMO/Compare/compare_<timestamp>.html` for the
+interpreted report. The quick text diff next to it is what the on-call
+engineer reads before leaving the window:
+
+![Quick text diff for SITE-A-SW-1: interface status, BGP summary, routes, and config changes](docs/img/quick-diff.png)
+
+Note what is *not* in that diff: uptime, BGP message counters, OSPF dead
+timers, and optic readings all moved between the two captures, and the
+normalizer dropped every one of them. SITE-B-SW-1, untouched by the change,
+reports "No meaningful changes detected."
+
+## Run it against your network
 
 Python 3.9+ and SSH reachability to your devices. Three lines, then
 answer the prompts (ticket number, SSH username, password):
@@ -135,7 +162,7 @@ commented with what it strips and why.
 ## Repo layout
 
 ```
-scripts/            entry points: precheck.py, postcheck.py, compare.py
+scripts/            entry points: precheck.py, postcheck.py, compare.py, demo.py
 modules/
   inventory.py      loads + validates inventory/devices.yml
   collect.py        parallel SSH capture (netmiko), zip packaging
@@ -146,7 +173,9 @@ modules/
 inventory/          devices.example.yml (copy to devices.yml, gitignored)
 reports/            generated evidence, gitignored
 tests/              pytest suite (no device access needed)
-docs/               ARCHITECTURE.md (design decisions), sample report + screenshots
+docs/               ARCHITECTURE.md (design decisions), sample report + screenshots,
+                    demo/NET-DEMO (fictional captures used by scripts/demo.py)
+.github/workflows/  ci.yml: ruff + yamllint + pytest on every push
 ```
 
 ## Tests and lint

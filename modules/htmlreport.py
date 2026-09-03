@@ -23,7 +23,7 @@ import os
 import re
 from datetime import datetime
 
-from modules.layout import find_latest_folder
+from modules.layout import display_path, find_latest_folder
 
 
 def safe_id(value):
@@ -1068,8 +1068,8 @@ details .diff-box {{
 
     <div class="header-meta">
         <div class="meta-pill">Ticket: {html.escape(ticket)}</div>
-        <div class="meta-pill">Precheck: {html.escape(precheck_folder)}</div>
-        <div class="meta-pill">Postcheck: {html.escape(postcheck_folder)}</div>
+        <div class="meta-pill">Precheck: {html.escape(display_path(precheck_folder))}</div>
+        <div class="meta-pill">Postcheck: {html.escape(display_path(postcheck_folder))}</div>
     </div>
 </div>
 
@@ -1355,6 +1355,6 @@ def build_html_report(ticket, dirs, run_timestamp, console):
         file.write(page)
 
     console.print("HTML comparison report created.")
-    console.print(f"Created: {html_report}")
+    console.print(f"Created: {display_path(html_report)}")
 
     return html_report
