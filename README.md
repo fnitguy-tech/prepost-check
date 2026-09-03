@@ -64,7 +64,7 @@ reports "No meaningful changes detected."
 
 ## Run it against your network
 
-Python 3.9+ and SSH reachability to your devices. Three lines, then
+Python 3.10+ (netmiko 4.7 needs it) and SSH reachability to your devices. Three lines, then
 answer the prompts (ticket number, SSH username, password):
 
 ```bash
