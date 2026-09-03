@@ -41,7 +41,9 @@ addresses, and ASNs in the sample are fictional.
 
 A fictional four-device uplink migration ships in `docs/demo/`
 ([scenario](docs/demo/NET-DEMO/SCENARIO.md)). One command runs the whole
-compare pipeline on it:
+workflow on it: the parallel collector (netmiko is swapped for a stub
+that replays the bundled captures, so no SSH happens), zip packaging,
+the quick text diff, and the HTML report.
 
 ```bash
 git clone https://github.com/fnitguy-tech/prepost-check.git && cd prepost-check
@@ -49,7 +51,14 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -r requirement
 python3 scripts/demo.py
 ```
 
-![Terminal: demo run writing the text diff and the HTML report](docs/img/demo-terminal.png)
+![Terminal: parallel collection in progress, one line per device as it connects](docs/img/progress-bar.png)
+
+Devices are collected in parallel (five at a time) with a live progress
+bar; an unreachable device is logged and recorded as a `<host>_FAILED.txt`
+finding instead of aborting the run. The full demo run, precheck through
+report:
+
+![Terminal: full demo run - precheck, postcheck, text diff, HTML report](docs/img/demo-terminal.png)
 
 Open `reports/NET-DEMO/Compare/compare_<timestamp>.html` for the
 interpreted report. The quick text diff next to it is what the on-call
