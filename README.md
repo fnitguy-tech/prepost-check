@@ -1,15 +1,54 @@
 # prepost-check
 
-Pre/post change validation for network maintenance windows. Captures
-device state before a change, captures it again after, and turns the
+Pre/post change validation for network maintenance windows. Capture
+device state before the change, capture it again after, and turn the
 difference into evidence you can attach to the ticket: a quick text
-diff for the on-call view and an interpreted HTML dashboard for
-everyone else.
+diff for the on-call view and an interpreted HTML report for everyone
+else.
 
 Built for mixed Arista EOS + Palo Alto PAN-OS environments; any
-platform netmiko can SSH to works by adding an inventory entry.
+platform netmiko can SSH to works by adding an inventory entry. Every
+command it runs is a read-only `show`.
 
 ![Report overview - health verdict, outcome summary, attention items](docs/img/report-overview.png)
+
+## What it tells you
+
+A 10-device window, condensed from the full
+[sample report](docs/sample-report.html) (download and open it in a
+browser; GitHub does not render repo HTML):
+
+```text
+NET-2043   Network Health: ATTENTION    devices 10 · changed 34 · attention 4
+
+SITE-B-SW-2    Attention 1 · Action Required 0 · Impact 28
+  BGP Peer Activated        EXTNET-LAB  10.118.9.3  AS65000
+    State                   Idle(Admin) → Estab
+    Prefixes Received       0 → 3
+    Evidence: show ip bgp summary + related BGP shutdown/no shutdown config
+
+SITE-A-SW-1    Attention 1 · Action Required 0 · Impact 31
+  BGP Prefix Count Changed  198.18.85.240  AS4200000001
+    Prefixes Received       248 → 53
+```
+
+Every finding links to the raw before/after diff behind it. All hostnames,
+addresses, and ASNs in the sample are fictional.
+
+## Try it
+
+Python 3.9+ and SSH reachability to your devices. Three lines, then
+answer the prompts (ticket number, SSH username, password):
+
+```bash
+git clone https://github.com/fnitguy-tech/prepost-check.git && cd prepost-check
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+cp inventory/devices.example.yml inventory/devices.yml && $EDITOR inventory/devices.yml && python3 scripts/precheck.py
+```
+
+`inventory/devices.yml` is gitignored, so real addresses stay on your
+machine. Run `scripts/postcheck.py` after the change and
+`scripts/compare.py` for the HTML report.
 
 ## Why this exists
 
@@ -65,25 +104,6 @@ is a complete sample report for a 10-device maintenance window (download
 the raw file and open it in a browser - GitHub doesn't render repo HTML).
 All hostnames, addresses, ASNs, and identifiers in it are fictional, and
 the bulk routing-table evidence is truncated for size.
-
-## Getting started
-
-Requires Python 3.9+ and SSH reachability to your devices.
-
-```bash
-git clone https://github.com/fnitguy-tech/prepost-check.git
-cd prepost-check
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Describe your devices (this file is gitignored - real IPs stay local)
-cp inventory/devices.example.yml inventory/devices.yml
-$EDITOR inventory/devices.yml
-
-python3 scripts/precheck.py
-```
 
 ## Configuring the inventory
 
