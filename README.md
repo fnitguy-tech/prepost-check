@@ -104,7 +104,7 @@ py -m venv .venv
 pip install -r requirements.txt
 Copy-Item inventory\devices.example.yml inventory\devices.yml
 notepad inventory\devices.yml
-py scripts\precheck.py
+py .\scripts\precheck.py
 ```
 
 Once the venv is active (the prompt starts with `(.venv)`), plain
