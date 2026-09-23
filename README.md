@@ -86,6 +86,34 @@ cp inventory/devices.example.yml inventory/devices.yml && $EDITOR inventory/devi
 machine. Run `scripts/postcheck.py` after the change and
 `scripts/compare.py` for the HTML report.
 
+### Windows (PowerShell)
+
+The lines above are for Linux/macOS. Windows PowerShell has no `source`
+or `$EDITOR`, the built-in 5.1 version does not accept `&&`, and Python
+installs as `python` rather than `python3`. Run these one at a time:
+
+```powershell
+git clone https://github.com/fnitguy-tech/prepost-check.git
+cd prepost-check
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item inventory\devices.example.yml inventory\devices.yml
+notepad inventory\devices.yml
+python scripts\precheck.py
+```
+
+If `Activate.ps1` is refused with "running scripts is disabled", allow
+locally-created scripts once and rerun it:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+If `python` is not recognized, use `py` in its place (`py -m venv .venv`,
+`py scripts\precheck.py`). Reopen the terminal after installing Python
+so the new PATH is picked up.
+
 ## Why this exists
 
 "Did the maintenance break anything?" is usually answered by eyeballing
