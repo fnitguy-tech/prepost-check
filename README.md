@@ -46,10 +46,15 @@ that replays the bundled captures, so no SSH happens), zip packaging,
 the quick text diff, and the HTML report.
 
 ```bash
-git clone https://github.com/fnitguy-tech/prepost-check.git && cd prepost-check
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+git clone https://github.com/fnitguy-tech/prepost-check.git
+cd prepost-check
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 python3 scripts/demo.py
 ```
+
+On Windows, see [Windows (PowerShell)](#windows-powershell) below.
 
 ![Terminal: parallel collection in progress, one line per device as it connects](docs/img/progress-bar.png)
 
@@ -73,13 +78,18 @@ reports "No meaningful changes detected."
 
 ## Run it against your network
 
-Python 3.10+ (netmiko 4.7 needs it) and SSH reachability to your devices. Three lines, then
-answer the prompts (ticket number, SSH username, password):
+Python 3.10+ (netmiko 4.7 needs it) and SSH reachability to your devices. Clone, install,
+fill in the inventory, then answer the prompts (ticket number, SSH username, password):
 
 ```bash
-git clone https://github.com/fnitguy-tech/prepost-check.git && cd prepost-check
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
-cp inventory/devices.example.yml inventory/devices.yml && $EDITOR inventory/devices.yml && python3 scripts/precheck.py
+git clone https://github.com/fnitguy-tech/prepost-check.git
+cd prepost-check
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp inventory/devices.example.yml inventory/devices.yml
+$EDITOR inventory/devices.yml
+python3 scripts/precheck.py
 ```
 
 `inventory/devices.yml` is gitignored, so real addresses stay on your
@@ -89,7 +99,8 @@ machine. Run `scripts/postcheck.py` after the change and
 ### Windows (PowerShell)
 
 The lines above are for Linux/macOS. Windows PowerShell has no `source`
-or `$EDITOR`, and the built-in 5.1 version does not accept `&&`. Use the
+or `$EDITOR`, and the built-in 5.1 version does not accept `&&` between
+commands. Use the
 `py` launcher that the python.org installer ships: it always finds the
 real Python, whereas plain `python` often hits the Microsoft Store stub
 Windows installs by default ("Python was not found; run without
@@ -106,6 +117,9 @@ Copy-Item inventory\devices.example.yml inventory\devices.yml
 notepad inventory\devices.yml
 py .\scripts\precheck.py
 ```
+
+The no-devices demo and the other two scripts follow the same shape:
+`py .\scripts\demo.py`, `py .\scripts\postcheck.py`, `py .\scripts\compare.py`.
 
 Once the venv is active (the prompt starts with `(.venv)`), plain
 `python` and `pip` also resolve to the venv's copy.
