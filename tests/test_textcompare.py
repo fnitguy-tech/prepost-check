@@ -91,3 +91,44 @@ def test_compare_report_skips_without_precheck(tmp_path):
 
     console = Console(file=io.StringIO())
     assert write_compare_report("NET-1", dirs, "2026-01-01_00-00", console) is None
+
+
+def test_vpn_ike_sa_drops_rekey_churn_keeps_identity():
+    # IKEv2 SA row: gateway ID, peer, name, role and algorithm survive;
+    # the established/expiration timestamps and child count do not.
+    pre = "1  198.51.100.7  gw-siteA  Init  PSK/ DH14/A256/SHA256  Aug.31 10:11:12  Sep.01 10:11:12  1"
+    post = "1  198.51.100.7  gw-siteA  Init  PSK/ DH14/A256/SHA256  Sep.01 10:11:12  Sep.02 10:11:12  2"
+    assert normalize_line("show vpn ike-sa", pre) == normalize_line("show vpn ike-sa", post)
+    assert normalize_line("show vpn ike-sa", pre) == "1 198.51.100.7 gw-siteA Init PSK/ DH14/A256/SHA256"
+
+    # Child SA row: SPIs (with and without 0x) and the message ID churn.
+    pre = "gw-siteA  1  tunnel-siteA  ESP/A256/SHA256  0x1a2b3c4d  CAFEF00D  1234"
+    post = "gw-siteA  1  tunnel-siteA  ESP/A256/SHA256  0x9f8e7d6c  DEADBEEF  1301"
+    assert normalize_line("show vpn ike-sa", pre) == normalize_line("show vpn ike-sa", post)
+    assert normalize_line("show vpn ike-sa", pre) == "gw-siteA tunnel-siteA ESP/A256/SHA256"
+
+
+def test_vpn_ike_sa_count_line_kept():
+    line = "Show IKEv2 IKE SA: Total 1 gateways found. 1 ike sa found."
+    assert normalize_line("show vpn ike-sa", line) == line
+
+
+def test_vpn_ipsec_sa_state_change_survives():
+    pre = "1  1  198.51.100.7  tunnel-siteA(gw-siteA)  ethernet1/1  Active  4  3450/28800  1.2GB"
+    post = "1  1  198.51.100.7  tunnel-siteA(gw-siteA)  ethernet1/1  Init  0  0/28800  0KB"
+    assert normalize_line("show vpn ipsec-sa", pre) == "1 198.51.100.7 tunnel-siteA(gw-siteA) ethernet1/1 Active"
+    assert normalize_line("show vpn ipsec-sa", pre) != normalize_line("show vpn ipsec-sa", post)
+
+
+def test_vpn_flow_kept_verbatim():
+    line = "1  tunnel-siteA  active  off  203.0.113.1  198.51.100.7  tunnel.1"
+    assert normalize_line("show vpn flow", line) == line
+
+
+def test_lsvpn_satellite_login_time_dropped():
+    cmd = "show global-protect-gateway current-satellite"
+    assert normalize_line(cmd, "        Login Time    : Aug.31 10:11:12") is None
+    assert normalize_line(cmd, "    Satellite         : sat-siteA") == "    Satellite         : sat-siteA"
+
+    cmd = "show global-protect-satellite current-gateway"
+    assert normalize_line(cmd, "  Status : Active") == "  Status : Active"

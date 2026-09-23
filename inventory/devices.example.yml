@@ -55,5 +55,19 @@ platforms:
       - show routing route
       - show routing protocol bgp peer
       - show routing protocol ospf neighbor
+      # IPsec / IKE tunnel state. "show vpn flow" is the one-line-per-
+      # tunnel up/down view; ike-sa and ipsec-sa are phase 1 / phase 2.
+      - show vpn flow
+      - show vpn ike-sa
+      - show vpn ipsec-sa
+      # LSVPN (GlobalProtect Large Scale VPN). The first lists the
+      # satellites connected to a hub gateway; the second, run on a
+      # satellite, shows which hub it is connected to. A firewall that
+      # is not in that role just returns a CLI error, which is captured
+      # and diffs clean (same error before and after). To avoid that,
+      # split hubs and satellites into two platform entries that share
+      # device_type: paloalto_panos but carry different command lists.
+      - show global-protect-gateway current-satellite
+      - show global-protect-satellite current-gateway
       - set cli config-output-format set
       - show config running

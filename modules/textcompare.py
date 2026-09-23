@@ -43,6 +43,72 @@ NOISY_STARTS = [
     "lifetime remain:",
 ]
 
+# PAN-OS IPsec / IKE / LSVPN status commands. Their rows carry tunnel
+# identity (gateway name, peer address, tunnel interface, state) next to
+# values that move on every rekey or capture: SPIs, lifetimes, message
+# IDs, established/expiry timestamps, satellite login times.
+VPN_SA_COMMANDS = [
+    "show vpn ike-sa",
+    "show vpn ipsec-sa",
+]
+
+VPN_SATELLITE_COMMANDS = [
+    "show global-protect-gateway current-satellite",
+    "show global-protect-satellite current-gateway",
+]
+
+# Tokens in an SA table row that change without the tunnel changing.
+VPN_CHURN_TOKENS = [
+    re.compile(r"^(0x)?[0-9a-fA-F]{8,}$"),                  # SPI (hex, with or without 0x)
+    re.compile(r"^[A-Z][a-z]{2}\.\d{1,2}$"),                # date: Aug.31
+    re.compile(r"^\d{1,2}:\d{2}(:\d{2})?$"),               # time: 10:11:12
+    re.compile(r"^\d+(\.\d+)?(/\d+(\.\d+)?)?[A-Za-z]{0,2}$"),  # counters, 3450/28800, 1.2GB
+    re.compile(r"^\d+[hms](\d+[ms])*$"),                     # 1h10m rekey countdown
+]
+
+# key: value lines in the LSVPN satellite/gateway output that only
+# record when the session started, not whether it is up.
+VPN_SATELLITE_NOISE = (
+    "login time",
+    "logout time",
+    "connect time",
+    "uptime",
+    "established",
+    "expiration",
+)
+
+
+def normalize_vpn_line(command, line):
+    """Shared IPsec/IKE/LSVPN churn rule; returns the line unchanged for
+    every other command so callers can apply it unconditionally."""
+    if command in VPN_SA_COMMANDS:
+        # "Total 1 gateways found. 1 ike sa found." is the SA count -
+        # keep it whole so an SA vanishing is a visible diff.
+        if "found" in line:
+            return line
+
+        parts = line.split()
+
+        if len(parts) < 2:
+            return line
+
+        # Never drop the first token: it is the gateway ID / gateway
+        # name that identifies the row. IPv4 addresses never match the
+        # counter pattern (three dots) so peers survive.
+        kept = [parts[0]] + [
+            p for p in parts[1:]
+            if not any(pattern.match(p) for pattern in VPN_CHURN_TOKENS)
+        ]
+        return " ".join(kept)
+
+    if command in VPN_SATELLITE_COMMANDS:
+        if line.strip().lower().startswith(VPN_SATELLITE_NOISE):
+            return None
+
+        return line
+
+    return line
+
 
 def normalize_line(command, line):
     """Return the comparable form of a line, or None to drop it."""
@@ -61,6 +127,9 @@ def normalize_line(command, line):
     # Strip trailing "x:y:z ago" / "N days, ... ago" age columns.
     line = re.sub(r"\s+\d+:\d+:\d+ ago$", "", line)
     line = re.sub(r"\s+\d+ days?,.*ago$", "", line)
+
+    if command in VPN_SA_COMMANDS or command in VPN_SATELLITE_COMMANDS:
+        return normalize_vpn_line(command, line)
 
     if command == "show ip bgp summary":
         # Keep peer identity + state/prefixes, drop the Up/Down timer

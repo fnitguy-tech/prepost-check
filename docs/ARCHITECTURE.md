@@ -34,7 +34,8 @@ whole-file.
   rule that strips the expected churn while keeping the operationally
   meaningful columns (a BGP peer's state and prefix counts survive;
   its up/down timer does not). The rules live next to the diff code in
-  `modules/textcompare.py` and `modules/htmlreport.py`, each commented
+  `modules/textcompare.py` and `modules/htmlreport.py` (the IPsec/IKE/LSVPN
+  rule lives once in `textcompare.py` and is imported by the HTML report), each commented
   with what it strips and why. Commands too volatile to ever diff
   usefully (per-lane optics readings) are still captured as evidence
   but listed in a skip-compare list.

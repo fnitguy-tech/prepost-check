@@ -63,13 +63,15 @@ def test_classify_raw_diff_commands():
         "show running-config": [],
         "show ip bgp summary": [],
         "show interfaces status": [],
+        "show vpn flow": [],
+        "show vpn ipsec-sa": [],
         "show hobbies": [],
     }
 
     categories = classify_raw_diff_commands(diffs)
 
     assert categories["Configuration"] == 1
-    assert categories["Protocol"] == 1
+    assert categories["Protocol"] == 3
     assert categories["Interface"] == 1
     assert categories["Evidence only"] == 1
 
@@ -119,3 +121,10 @@ def test_build_html_report_end_to_end(tmp_path):
     assert "BGP Peer Administratively Disabled" in content
     assert "neighbor 203.0.113.1 shutdown" in content
     assert content.count("<canvas") == 3
+
+
+def test_clean_line_applies_shared_vpn_rule():
+    pre = "gw-siteA  1  tunnel-siteA  ESP/A256/SHA256  0x1a2b3c4d  CAFEF00D  1234"
+    post = "gw-siteA  1  tunnel-siteA  ESP/A256/SHA256  0x9f8e7d6c  DEADBEEF  1301"
+    assert clean_line_for_compare("show vpn ike-sa", pre) == clean_line_for_compare("show vpn ike-sa", post)
+    assert clean_line_for_compare("show global-protect-gateway current-satellite", "  Login Time : x") is None

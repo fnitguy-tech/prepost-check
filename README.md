@@ -160,13 +160,19 @@ platforms:
 ```
 
 See `inventory/devices.example.yml` for the full curated command lists
-for Arista EOS and PAN-OS.
+for Arista EOS and PAN-OS. The PAN-OS list includes IPsec/IKE tunnel
+state (`show vpn flow`, `show vpn ike-sa`, `show vpn ipsec-sa`) and
+LSVPN hub/satellite status, normalized so SPIs, rekey timers, and
+satellite login times never show up as changes but a tunnel going
+`active → init` does.
 
 Commands with per-second churn (e.g. `show interfaces transceiver`) are
 still captured as evidence but excluded from comparison - the skip
 lists and per-command normalization rules live in
 `modules/textcompare.py` and `modules/htmlreport.py`, each rule
-commented with what it strips and why.
+commented with what it strips and why. The IPsec/IKE/LSVPN rule is
+defined once in `textcompare.py` and imported by the HTML report so both
+views agree on what a tunnel change looks like.
 
 ## Repo layout
 
