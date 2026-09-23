@@ -89,19 +89,26 @@ machine. Run `scripts/postcheck.py` after the change and
 ### Windows (PowerShell)
 
 The lines above are for Linux/macOS. Windows PowerShell has no `source`
-or `$EDITOR`, the built-in 5.1 version does not accept `&&`, and Python
-installs as `python` rather than `python3`. Run these one at a time:
+or `$EDITOR`, and the built-in 5.1 version does not accept `&&`. Use the
+`py` launcher that the python.org installer ships: it always finds the
+real Python, whereas plain `python` often hits the Microsoft Store stub
+Windows installs by default ("Python was not found; run without
+arguments to install from the Microsoft Store"). Run these one at a
+time:
 
 ```powershell
 git clone https://github.com/fnitguy-tech/prepost-check.git
 cd prepost-check
-python -m venv .venv
+py -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 Copy-Item inventory\devices.example.yml inventory\devices.yml
 notepad inventory\devices.yml
-python scripts\precheck.py
+py scripts\precheck.py
 ```
+
+Once the venv is active (the prompt starts with `(.venv)`), plain
+`python` and `pip` also resolve to the venv's copy.
 
 If `Activate.ps1` is refused with "running scripts is disabled", allow
 locally-created scripts once and rerun it:
@@ -110,9 +117,9 @@ locally-created scripts once and rerun it:
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-If `python` is not recognized, use `py` in its place (`py -m venv .venv`,
-`py scripts\precheck.py`). Reopen the terminal after installing Python
-so the new PATH is picked up.
+If `py` is not found either, Python did not finish installing: rerun
+the python.org installer with "Add python.exe to PATH" ticked, then
+reopen the terminal.
 
 ## Why this exists
 
