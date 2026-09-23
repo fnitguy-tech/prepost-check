@@ -108,6 +108,7 @@ arguments to install from the Microsoft Store"). Run these one at a
 time:
 
 ```powershell
+cd $HOME
 git clone https://github.com/fnitguy-tech/prepost-check.git
 cd prepost-check
 py -m venv .venv
@@ -121,8 +122,10 @@ py .\scripts\precheck.py
 The no-devices demo and the other two scripts follow the same shape:
 `py .\scripts\demo.py`, `py .\scripts\postcheck.py`, `py .\scripts\compare.py`.
 
-Once the venv is active (the prompt starts with `(.venv)`), plain
-`python` and `pip` also resolve to the venv's copy.
+`cd $HOME` puts the clone in your user folder (`C:\Users\<you>`); the
+rest of the lines assume you are inside `prepost-check`. Once the venv
+is active (the prompt starts with `(.venv)`), plain `python` and `pip`
+also resolve to the venv's copy.
 
 If `Activate.ps1` is refused with "running scripts is disabled", allow
 locally-created scripts once and rerun it:
