@@ -131,6 +131,15 @@ locally-created scripts once and rerun it:
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
+If `pip` is not found after activating, or you cannot activate at all,
+skip activation and call the venv's own interpreter by path. It needs
+nothing on PATH:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe .\scripts\precheck.py
+```
+
 If `py` is not found either, Python did not finish installing: rerun
 the python.org installer with "Add python.exe to PATH" ticked, then
 reopen the terminal.
