@@ -227,6 +227,34 @@ LSVPN hub/satellite status, normalized so SPIs, rekey timers, and
 satellite login times never show up as changes but a tunnel going
 `active → init` does.
 
+### A per-change inventory
+
+For one maintenance, copy the parts of `devices.yml` you need into a
+file named for the change (`inventory/<change>-prepost.yml`) and pass it
+with `--inventory`. It sits next to `devices.yml`; nothing in the
+existing inventory is edited. The capture then covers only the devices
+in scope and can carry the commands that prove that change, for example
+`show ip bgp neighbors <peer> advertised-routes` for a peering that is
+being re-filtered.
+
+### LSVPN and routing-policy maintenances
+
+Two kinds of change are easy to get wrong and easy to capture:
+
+- **LSVPN (GlobalProtect Large Scale VPN).** On the hub, add
+  `show global-protect-gateway gateway`,
+  `show global-protect-gateway flow-site-to-site` and
+  `show global-protect-portal satellite-cookie-expiration` next to
+  `show global-protect-gateway current-satellite`. Together they answer
+  "is every gateway still built", "is every satellite still connected"
+  and "did the cookie lifetime move". The flow table's byte and packet
+  counters are normalized away, so a satellite leaving is a change and
+  traffic passing is not.
+- **Routing policy.** On the switches, `show ip prefix-list` and
+  `show route-map` show the lists as the device holds them, so a peer
+  that starts sending or accepting a different number of prefixes can be
+  traced to the list that changed, without reading a full config diff.
+
 Commands with per-second churn (e.g. `show interfaces transceiver`) are
 still captured as evidence but excluded from comparison - the skip
 lists and per-command normalization rules live in

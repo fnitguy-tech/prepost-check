@@ -41,6 +41,12 @@ platforms:
       - show ip bgp summary
       - show ip route
       - show ip bgp
+      # Routing policy, for changes that edit what a peer is sent or
+      # accepted. The running-config diff shows the edit; these two show
+      # the lists as the switch has them, which is easier to read when a
+      # peer suddenly sends or receives a different number of prefixes.
+      - show ip prefix-list
+      - show route-map
       - show running-config
       - show version
 
@@ -69,5 +75,16 @@ platforms:
       # device_type: paloalto_panos but carry different command lists.
       - show global-protect-gateway current-satellite
       - show global-protect-satellite current-gateway
+      # Hub-side LSVPN state. The gateway list proves each gateway still
+      # has its tunnel, pool, access routes and certificate; the flow
+      # table shows the live site-to-site tunnels (its counters are
+      # normalized away); the cookie lifetime is a portal-wide setting
+      # that is easy to change by accident and hard to notice.
+      - show global-protect-gateway gateway
+      - show global-protect-gateway flow-site-to-site
+      - show global-protect-portal satellite-cookie-expiration
+      # Interface state, so a new or missing tunnel/loopback is obvious
+      # without reading the whole config.
+      - show interface all
       - set cli config-output-format set
       - show config running

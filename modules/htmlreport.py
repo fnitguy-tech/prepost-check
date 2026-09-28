@@ -25,6 +25,8 @@ from datetime import datetime
 
 from modules.layout import display_path, find_latest_folder
 from modules.textcompare import (
+    VPN_FLOW_COMMANDS,
+    VPN_GATEWAY_COMMANDS,
     VPN_SA_COMMANDS,
     VPN_SATELLITE_COMMANDS,
     normalize_vpn_line,
@@ -94,7 +96,8 @@ def clean_line_for_compare(command, line):
 
     # IPsec/IKE/LSVPN churn (SPIs, rekey timers, login times) - one
     # rule shared with textcompare so the two reports agree.
-    if command in VPN_SA_COMMANDS or command in VPN_SATELLITE_COMMANDS:
+    if (command in VPN_SA_COMMANDS or command in VPN_SATELLITE_COMMANDS
+            or command in VPN_FLOW_COMMANDS or command in VPN_GATEWAY_COMMANDS):
         return normalize_vpn_line(command, line)
 
     if command == "show ip bgp summary":
@@ -405,8 +408,13 @@ def classify_raw_diff_commands(diffs):
             "show vpn flow",
             *VPN_SA_COMMANDS,
             *VPN_SATELLITE_COMMANDS,
+            *VPN_FLOW_COMMANDS,
+            *VPN_GATEWAY_COMMANDS,
+            "show global-protect-portal satellite-cookie-expiration",
         ]:
             categories["Protocol"] += 1
+        elif command in ["show route-map", "show ip prefix-list"]:
+            categories["Routing"] += 1
         elif command in ["show ip route", "show ip route ospf", "show ip bgp", "show routing route"]:
             categories["Routing"] += 1
         elif command in ["show interfaces status", "show interfaces trunk", "show port-channel summary", "show interfaces counters errors", "show interfaces description"]:

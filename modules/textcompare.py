@@ -41,6 +41,10 @@ NOISY_STARTS = [
     "Total messages:",
     "Flap counts:",
     "lifetime remain:",
+    "Bytes received",
+    "Bytes sent",
+    "Packets received",
+    "Packets sent",
 ]
 
 # PAN-OS IPsec / IKE / LSVPN status commands. Their rows carry tunnel
@@ -55,6 +59,30 @@ VPN_SA_COMMANDS = [
 VPN_SATELLITE_COMMANDS = [
     "show global-protect-gateway current-satellite",
     "show global-protect-satellite current-gateway",
+]
+
+# LSVPN per-tunnel flow table on a hub: each row names the tunnel and the
+# satellite, then carries byte/packet counters that move every second.
+# Same shape as an SA row, so the SA rule handles it: keep the identity
+# column, drop the numeric ones.
+# Hub gateway list. The built state (tunnel, pool, access routes,
+# certificate) is what a maintenance changes; the per-gateway satellite
+# counter moves whenever an aircraft powers up or leaves, which is
+# normal operation, not a change we made.
+VPN_GATEWAY_COMMANDS = [
+    "show global-protect-gateway gateway",
+]
+
+VPN_GATEWAY_COUNT_FIELDS = (
+    "number of satellites",
+    "current satellites",
+    "satellites connected",
+    "active satellites",
+)
+
+VPN_FLOW_COMMANDS = [
+    "show global-protect-gateway flow-site-to-site",
+    "show global-protect-gateway flow",
 ]
 
 # Tokens in an SA table row that change without the tunnel changing.
@@ -81,7 +109,7 @@ VPN_SATELLITE_NOISE = (
 def normalize_vpn_line(command, line):
     """Shared IPsec/IKE/LSVPN churn rule; returns the line unchanged for
     every other command so callers can apply it unconditionally."""
-    if command in VPN_SA_COMMANDS:
+    if command in VPN_SA_COMMANDS or command in VPN_FLOW_COMMANDS:
         # "Total 1 gateways found. 1 ike sa found." is the SA count -
         # keep it whole so an SA vanishing is a visible diff.
         if "found" in line:
@@ -107,6 +135,12 @@ def normalize_vpn_line(command, line):
 
         return line
 
+    if command in VPN_GATEWAY_COMMANDS:
+        if line.strip().lower().startswith(VPN_GATEWAY_COUNT_FIELDS):
+            return None
+
+        return line
+
     return line
 
 
@@ -128,8 +162,17 @@ def normalize_line(command, line):
     line = re.sub(r"\s+\d+:\d+:\d+ ago$", "", line)
     line = re.sub(r"\s+\d+ days?,.*ago$", "", line)
 
-    if command in VPN_SA_COMMANDS or command in VPN_SATELLITE_COMMANDS:
+    if (command in VPN_SA_COMMANDS or command in VPN_SATELLITE_COMMANDS
+            or command in VPN_FLOW_COMMANDS or command in VPN_GATEWAY_COMMANDS):
         return normalize_vpn_line(command, line)
+
+    # EOS route-map / prefix-list listings carry per-entry hit counters;
+    # the entries themselves are the point, so drop the counter line.
+    if command in ["show route-map", "show ip prefix-list"]:
+        if re.match(r"^\s*(Match|Set)?\s*clauses? hit", line.strip(), re.I):
+            return None
+
+        return re.sub(r"\s*\(\s*\d+\s+(matches|hits)\s*\)$", "", line)
 
     if command == "show ip bgp summary":
         # Keep peer identity + state/prefixes, drop the Up/Down timer
