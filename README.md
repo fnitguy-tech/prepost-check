@@ -237,8 +237,15 @@ and every raw diff behind a collapsible section for evidence.
 
 Interpreted findings cover:
 
-- **BGP peers** (`show ip bgp summary`): removed, added, state change,
-  administrative shutdown, prefix-count change.
+- **BGP peers** (`show ip bgp summary`, and PAN-OS
+  `show routing protocol bgp peer`): removed, added, state change,
+  administrative shutdown, prefix-count change, and **session reset**: a
+  peer that is `Estab` in both captures but whose Up/Down went from
+  `5d02h` to `00:12:33` dropped and came back during the window
+  (`Attention`). The postcheck is always taken later, so an uptime can
+  only go backwards if the session restarted; coarse formats (`1d02h`,
+  `2w3d`) are only flagged when the post value is unambiguously smaller,
+  and an unparsable value (`never`) is never flagged.
 - **Prefix-lists** (`show ip prefix-list`, or the running config when
   that command is not captured): entry withdrawn (`Attention`), entry
   overwritten at the same sequence number (`Attention`), entry
@@ -342,7 +349,7 @@ Linux / macOS (on Windows, use `py -m pytest tests/` for the second line):
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 56 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 68 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
@@ -350,8 +357,9 @@ yamllint .                  # .yamllint config is checked in
 CI (`.github/workflows/ci.yml`) runs the same three commands on Python 3.12
 and the test suite alone on 3.10, the documented floor.
 
-The test suite covers the normalization rules, BGP summary parsing,
-prefix-list parsing and rating, finding classification, and both report
+The test suite covers the normalization rules, BGP summary parsing
+(including the Up/Down formats and the reset rule), prefix-list parsing
+and rating, finding classification, and both report
 generators end-to-end against synthetic device captures, so parser
 changes can be validated without touching a live network.
 

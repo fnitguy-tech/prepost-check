@@ -184,8 +184,80 @@ def normalized_section(command, lines):
     return cleaned
 
 
+# EOS "Up/Down" column formats. The timer rolls over to a coarser unit as
+# the session ages: 00:52:40 under a day, 1d02h under a week, 2w3d after
+# that (and 1y2w eventually). "never" means the session has never come up.
+UPTIME_CLOCK = re.compile(r"^(\d+):(\d{2}):(\d{2})$")
+UPTIME_UNITS = re.compile(r"^(?:\d+[ywdhms])+$")
+UPTIME_UNIT_SECONDS = {"y": 365 * 86400, "w": 7 * 86400, "d": 86400, "h": 3600, "m": 60, "s": 1}
+
+
+def parse_uptime(token):
+    """Seconds in an Up/Down value plus its granularity, or None.
+
+    Granularity is the smallest unit the format shows (1s for a clock,
+    1h for "1d02h", 1d for "2w3d"): the true value lies anywhere in
+    [seconds, seconds + granularity), which the reset check honours so a
+    coarse timer is never read as having gone backwards when it has not.
+    Anything unparsable (including "never") is None, never a guess.
+    """
+    if token is None:
+        return None
+
+    token = token.strip()
+    clock = UPTIME_CLOCK.match(token)
+
+    if clock:
+        hours, minutes, seconds = (int(part) for part in clock.groups())
+        return hours * 3600 + minutes * 60 + seconds, 1
+
+    if UPTIME_UNITS.match(token.lower()):
+        total = 0
+        granularity = None
+
+        for amount, unit in re.findall(r"(\d+)([ywdhms])", token.lower()):
+            total += int(amount) * UPTIME_UNIT_SECONDS[unit]
+            granularity = UPTIME_UNIT_SECONDS[unit]
+
+        return total, granularity
+
+    # PAN-OS: "Peer status: Established, for 123456 secs".
+    secs = re.match(r"^(\d+)\s*secs?$", token.lower())
+
+    if secs:
+        return int(secs.group(1)), 1
+
+    return None
+
+
+def session_reset(before, after):
+    """True only when the post uptime is unambiguously smaller than the pre.
+
+    The postcheck is always taken after the precheck, so a session that
+    stayed up can only show an equal (coarse format) or larger value. A
+    smaller one means the session was torn down and came back in between,
+    which the state column alone (Estab -> Estab) can never show.
+    """
+    pre = parse_uptime(before.get("updown"))
+    post = parse_uptime(after.get("updown"))
+
+    if pre is None or post is None:
+        return False
+
+    post_seconds, post_granularity = post
+    pre_seconds, _pre_granularity = pre
+
+    return post_seconds + post_granularity <= pre_seconds
+
+
 def parse_bgp_summary(lines):
-    """Parse 'show ip bgp summary' rows into per-peer dicts."""
+    """Parse 'show ip bgp summary' rows into per-peer dicts.
+
+    The Up/Down column is kept (as "updown") even though the raw-diff
+    normalizers strip it: it is churn in a diff but the highest-signal
+    field in the interpreted layer, because uptime going backwards is the
+    only trace a reset-and-recovered session leaves in this table.
+    """
     peers = {}
 
     for line in lines:
@@ -214,6 +286,7 @@ def parse_bgp_summary(lines):
         peer_as = parts[peer_ip_index + 2] if len(parts) > peer_ip_index + 2 else "UNKNOWN"
 
         state = parts[-1]
+        state_index = len(parts) - 1
         prefixes_received = "0"
         prefixes_accepted = "0"
 
@@ -227,6 +300,11 @@ def parse_bgp_summary(lines):
 
         elif "Idle(Admin)" in parts:
             state = "Idle(Admin)"
+            state_index = parts.index("Idle(Admin)")
+
+        # Up/Down sits immediately before State. Only trust it when it
+        # lies after the AS column, so a short or odd row yields None.
+        updown = parts[state_index - 1] if state_index - 1 > peer_ip_index + 2 else None
 
         key = f"{peer_name} {peer_ip}"
 
@@ -237,9 +315,84 @@ def parse_bgp_summary(lines):
             "state": state,
             "prefixes_received": prefixes_received,
             "prefixes_accepted": prefixes_accepted,
+            "updown": updown,
             "raw": clean,
         }
 
+    return peers
+
+
+# PAN-OS "show routing protocol bgp peer" is one indented block per peer
+# rather than a table. These are the lines that carry the same facts the
+# EOS summary row does; everything else in the block is ignored.
+PANOS_PEER_START = re.compile(r"^\s*Peer:\s*(\S+)", re.IGNORECASE)
+PANOS_PEER_FIELDS = {
+    "address": re.compile(r"^\s*Peer address:\s*(\d+\.\d+\.\d+\.\d+)", re.IGNORECASE),
+    "as": re.compile(r"^\s*Remote AS:\s*(\d+)", re.IGNORECASE),
+    "status": re.compile(r"^\s*Peer status:\s*([A-Za-z]+)(?:,\s*for\s+(\d+)\s*secs?)?", re.IGNORECASE),
+    "incoming": re.compile(r"^\s*Incoming total:\s*(\d+),\s*accepted:\s*(\d+)", re.IGNORECASE),
+}
+
+
+def parse_panos_bgp_peers(lines):
+    """Parse PAN-OS 'show routing protocol bgp peer' blocks into the same
+    per-peer dicts parse_bgp_summary() produces, so the BGP findings
+    treat a firewall peer exactly like a switch peer.
+
+    "Established" is stored as "Estab" so the state transitions and the
+    uptime reset check share one vocabulary; other PAN-OS states (Idle,
+    Active, Connect, OpenSent) are kept as written.
+    """
+    peers = {}
+    current = None
+
+    for line in lines:
+        start = PANOS_PEER_START.match(line)
+
+        if start:
+            current = {
+                "name": start.group(1),
+                "ip": "",
+                "as": "UNKNOWN",
+                "state": "UNKNOWN",
+                "prefixes_received": "0",
+                "prefixes_accepted": "0",
+                "updown": None,
+                "raw": line.strip(),
+            }
+            continue
+
+        if current is None:
+            continue
+
+        address = PANOS_PEER_FIELDS["address"].match(line)
+        remote_as = PANOS_PEER_FIELDS["as"].match(line)
+        status = PANOS_PEER_FIELDS["status"].match(line)
+        incoming = PANOS_PEER_FIELDS["incoming"].match(line)
+
+        if address:
+            current["ip"] = address.group(1)
+            peers[f"{current['name']} {current['ip']}"] = current
+        elif remote_as:
+            current["as"] = remote_as.group(1)
+        elif status:
+            state = status.group(1)
+            current["state"] = "Estab" if state.lower() == "established" else state
+
+            if status.group(2) is not None:
+                current["updown"] = f"{status.group(2)} secs"
+        elif incoming and current["prefixes_received"] == "0":
+            # First AFI/SAFI block only (ipv4 unicast comes first).
+            current["prefixes_received"] = incoming.group(1)
+            current["prefixes_accepted"] = incoming.group(2)
+
+    return peers
+
+
+def parse_bgp_peers(sections):
+    """All BGP peers in one capture, whichever platform produced it."""
+    peers = parse_bgp_summary(sections.get("show ip bgp summary", []))
+    peers.update(parse_panos_bgp_peers(sections.get("show routing protocol bgp peer", [])))
     return peers
 
 
@@ -288,6 +441,8 @@ def bgp_finding(classification, category, impact, title, peer, before, after, su
     rx_after = after["prefixes_received"] if after else "0"
     acc_before = before["prefixes_accepted"] if before else "0"
     acc_after = after["prefixes_accepted"] if after else "0"
+    updown_before = (before.get("updown") or "n/a") if before else "Not Present"
+    updown_after = (after.get("updown") or "n/a") if after else "Not Present"
 
     return {
         "classification": classification,
@@ -302,6 +457,7 @@ def bgp_finding(classification, category, impact, title, peer, before, after, su
             ("State", state_before, state_after),
             ("Prefixes Received", rx_before, rx_after),
             ("Prefixes Accepted", acc_before, acc_after),
+            ("Up/Down", updown_before, updown_after),
         ],
         "summary": summary,
         "evidence": evidence,
@@ -310,8 +466,8 @@ def bgp_finding(classification, category, impact, title, peer, before, after, su
 
 def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
     """Interpret per-peer BGP changes into impact-rated findings."""
-    pre_bgp = parse_bgp_summary(pre_sections.get("show ip bgp summary", []))
-    post_bgp = parse_bgp_summary(post_sections.get("show ip bgp summary", []))
+    pre_bgp = parse_bgp_peers(pre_sections)
+    post_bgp = parse_bgp_peers(post_sections)
 
     findings = []
     config_text = "\n".join(config_changes).lower()
@@ -363,6 +519,26 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
 
             findings.append(bgp_finding(
                 "Protocol", "BGP state", impact, title, after, before, after, summary, detected_evidence,
+            ))
+
+        elif after["state"] == "Estab" and session_reset(before, after):
+            # Estab -> Estab looks healthy; a smaller uptime is the only
+            # trace of a session that dropped and came straight back.
+            before_received = int(before["prefixes_received"]) if before["prefixes_received"].isdigit() else 0
+            after_received = int(after["prefixes_received"]) if after["prefixes_received"].isdigit() else 0
+            delta = after_received - before_received
+            prefix_note = (
+                "Prefix counts are unchanged." if delta == 0 and before["prefixes_accepted"] == after["prefixes_accepted"]
+                else f"Prefix count changed by {delta:+d} across the reset."
+            )
+
+            findings.append(bgp_finding(
+                "Protocol", "BGP state", "Attention", "BGP Session Reset", after, before, after,
+                f"The peer is established in both captures but its session uptime went from "
+                f"{before['updown']} to {after['updown']}. The postcheck is taken after the precheck, so an "
+                f"uninterrupted session can only show a larger value: this session was torn down and "
+                f"re-established during the window. {prefix_note}",
+                detected_evidence,
             ))
 
         elif (

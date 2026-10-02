@@ -10,7 +10,10 @@ timers, BGP message counts and content-version lines change on every
 capture and would bury real findings, so they are stripped or collapsed
 before diffing. Each command's rule keeps the operationally meaningful
 columns (e.g. a BGP peer's state and prefix counts survive; its
-up/down timer does not).
+up/down timer does not). That is the right call for a diff, where the
+timer differs on every capture; the interpreted HTML report reads the
+same column on purpose, because an uptime that went backwards is the
+only trace a session that reset and recovered leaves in that table.
 """
 
 import difflib

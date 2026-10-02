@@ -66,6 +66,17 @@ whole-file.
   entry is Changed; a new sequence is Stable. The raw config diff cannot
   tell those four apart.
 
+- **The BGP Up/Down timer is churn in the diff and signal in the
+  report.** Both diff normalizers strip it, correctly: it differs on
+  every capture. The interpreted layer keeps it, because a session that
+  reset and recovered reads `Estab -> Estab` with identical prefix
+  counts and a smaller uptime is the only trace it leaves. The reset
+  rule accounts for the coarse EOS formats (`1d02h` is anywhere in
+  [26h, 27h)) by requiring post + its granularity <= pre, and treats an
+  unparsable value (`never`) as no evidence rather than a guess. PAN-OS
+  `show routing protocol bgp peer` blocks are parsed into the same
+  per-peer dicts so firewall peers get the same findings.
+
 - **An unreachable device is a finding, not an abort.** During a
   maintenance window, a device that stopped answering SSH is exactly
   the kind of thing the evidence should show. Collection records it as
