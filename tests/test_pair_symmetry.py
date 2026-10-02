@@ -157,16 +157,61 @@ def test_lists_present_on_one_member_only_are_not_compared_unless_both_had_them(
 
 
 def test_route_map_divergence_lists_the_differing_lines():
+    """A match line that differs changes which routes the member acts on."""
     pair = ("SITE-A-SW-1", "SITE-A-SW-2")
     sw1 = _capture(route_map_lines=ROUTE_MAP)
-    sw2 = _capture(route_map_lines=[line.replace("64500:100", "64500:200") for line in ROUTE_MAP])
+    sw2 = _capture(route_map_lines=[line.replace("prefix-list ISP-OUT", "prefix-list ISP-Out") for line in ROUTE_MAP])
 
     findings = pair_findings(pair, sw1, sw2)
 
     assert [f["title"] for f in findings] == ["Pair Route-Map Divergence"]
     assert findings[0]["impact"] == "Attention"
-    assert ("removed", "SITE-A-SW-1: set community 64500:100") in findings[0]["detail"]
-    assert ("added", "SITE-A-SW-2: set community 64500:200") in findings[0]["detail"]
+    assert ("removed", "SITE-A-SW-1: match ip address prefix-list ISP-OUT") in findings[0]["detail"]
+    assert ("added", "SITE-A-SW-2: match ip address prefix-list ISP-Out") in findings[0]["detail"]
+
+
+def test_route_map_preference_tuning_is_not_a_divergence():
+    """How a pair biases traffic toward one member is the design, not a defect.
+
+    SW-2 is the backup: it prepends its own AS twice where SW-1 does not
+    prepend at all, sets a lower local-preference, and labels its clauses
+    "Path 2". Comparing the two members line by line reports every one of
+    those as a divergence, which on a real MLAG pair buries the findings
+    that matter under two dozen that do not."""
+    pair = ("SITE-A-SW-1", "SITE-A-SW-2")
+    sw1 = _capture(route_map_lines=ROUTE_MAP)
+    sw2 = _capture(route_map_lines=[
+        "route-map ISP-OUT permit 10",
+        "  Description:",
+        "    description transit out - Path 2",
+        "  Match clauses:",
+        "    match ip address prefix-list ISP-OUT",
+        "  Match clauses hit: 51",
+        "  Set clauses:",
+        "    set community 64500:200",
+        "    set as-path prepend 64500 64500",
+        "    set local-preference 150",
+        "route-map ISP-OUT deny 20",
+        "  Match clauses:",
+        "  Set clauses:",
+    ])
+
+    assert pair_findings(pair, sw1, sw2) == []
+
+
+def test_route_map_next_hop_still_diverges_despite_tuning():
+    """Tuning is set aside; where the traffic goes is not."""
+    pair = ("SITE-A-SW-1", "SITE-A-SW-2")
+    sw1 = _capture(route_map_lines=ROUTE_MAP)
+    sw2 = _capture(route_map_lines=[
+        line.replace("    set community 64500:100", "    set ip next-hop 192.0.2.9")
+        for line in ROUTE_MAP
+    ])
+
+    findings = pair_findings(pair, sw1, sw2)
+
+    assert [f["title"] for f in findings] == ["Pair Route-Map Divergence"]
+    assert ("added", "SITE-A-SW-2: set ip next-hop 192.0.2.9") in findings[0]["detail"]
 
 
 def test_ha_cookie_split_is_attention_but_active_passive_is_not():
@@ -254,3 +299,96 @@ def test_explicit_pairs_reach_analyze(tmp_path):
     analysis = analyze(str(pre_run), str(post_run), pairs=[["CORE-EAST", "CORE-WEST"]])
     assert analysis["pairs"] == [("CORE-EAST", "CORE-WEST")]
     assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-List Divergence"]
+
+
+def test_ha_group_label_does_not_desynchronize_every_key():
+    """A PAN-OS HA group header carries an optional local label.
+
+    One member prints "Group 1:" and the other "Group 1: MMP-E-HA" - the
+    label is a name an operator typed, not synchronized state. Only the
+    bare form looks like a block header, so without normalizing it one
+    member's leaves land under "Group 1/Local Information/Mode" and the
+    other's under "Local Information/Mode". Every key then differs, and a
+    healthy pair reports a wall of "Not Present" mismatches."""
+    body = """\
+  Mode: Active-Passive
+  Local Information:
+    Version: 1
+    Mode: Active-Passive
+    State: {state} (last 30 days)
+    Version Compatibility:
+      Application Content Compatibility: Match
+      IOT Content Compatibility: {iot}
+"""
+    unlabelled = parse_ha_state(("Group 1: \n" + body.format(state="active", iot="Match")).splitlines())
+    labelled = parse_ha_state(("Group 1: MMP-E-HA\n" + body.format(state="passive", iot="Match")).splitlines())
+
+    assert unlabelled == labelled
+    assert "Group 1/Local Information/Mode" in unlabelled
+
+
+def test_ha_content_mismatch_is_reported_even_when_both_members_agree():
+    """The pair can disagree with itself while both captures agree.
+
+    The firewall grades its own content versions against its peer's, so a
+    stale file makes BOTH members print "Mismatch". That reads as agreement
+    to a key-by-key compare and slips through it."""
+    pair = ("SITE-A-FW-1", "SITE-A-FW-2")
+    body = """\
+Group 1: {label}
+  Mode: Active-Passive
+  Local Information:
+    Mode: Active-Passive
+    State: {state} (last 30 days)
+    Version Compatibility:
+      Application Content Compatibility: Match
+      IOT Content Compatibility: {iot}
+"""
+    fw1 = _capture(ha=body.format(label="", state="active", iot="Mismatch"))
+    fw2 = _capture(ha=body.format(label="SITE-A-HA", state="passive", iot="Mismatch"))
+
+    findings = pair_findings(pair, fw1, fw2)
+
+    assert [f["title"] for f in findings] == ["Pair HA Content Version Mismatch"]
+    assert findings[0]["fields"] == [("IOT Content Compatibility", "Mismatch", "Mismatch")]
+    assert "show system info" in findings[0]["summary"]
+
+    in_sync = _capture(ha=body.format(label="SITE-A-HA", state="passive", iot="Match"))
+    assert pair_findings(pair, _capture(ha=body.format(label="", state="active", iot="Match")), in_sync) == []
+
+
+def test_health_verdict_ignores_pair_symmetry(tmp_path):
+    """A window that changed nothing must not read red.
+
+    Pair-symmetry findings describe how two members differ from each other
+    right now - they were as true in the precheck as in the postcheck. Rolling
+    them into the health verdict made a clean verification window report
+    "Attention" next to "Changed: 0", which reads backwards."""
+    pre_run = tmp_path / "Precheck" / "precheck_2026-01-01_00-00"
+    post_run = tmp_path / "Postcheck" / "postcheck_2026-01-01_02-00"
+
+    # Identical pre and post on both members, but the pair disagrees with
+    # itself: SW-2 is missing a sequence SW-1 has, in both captures.
+    for folder in (pre_run, post_run):
+        _write(folder, "SITE-A-SW-1", PREFIX_LIST)
+        _write(folder, "SITE-A-SW-2", PREFIX_LIST[:-1])
+
+    analysis = analyze(str(pre_run), str(post_run))
+
+    assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-List Divergence"]
+    assert analysis["symmetry_totals"]["Attention"] == 1
+    assert analysis["window_totals"] == {"Stable": 0, "Changed": 0, "Attention": 0, "Action Required": 0}
+
+    dirs = {
+        "precheck": str(tmp_path / "Precheck"),
+        "postcheck": str(tmp_path / "Postcheck"),
+        "compare": str(tmp_path / "Compare"),
+    }
+    report = build_html_report("NET-5", dirs, "2026-01-01_02-05", Console(file=io.StringIO()))
+    with open(report, encoding="utf-8") as handle:
+        page = handle.read()
+
+    assert "health-stable" in page
+    assert "Nothing changed between the precheck and the postcheck" in page
+    assert "Pair Symmetry" in page
+    assert "1 pair-symmetry finding(s)" in page

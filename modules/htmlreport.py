@@ -174,6 +174,9 @@ def clean_line_for_compare(command, line):
 
 
 def normalized_section(command, lines):
+    if command in PANOS_ROUTE_COMMANDS:
+        lines = blank_panos_route_age(lines)
+
     cleaned = []
 
     for line in lines:
@@ -183,6 +186,64 @@ def normalized_section(command, lines):
             cleaned.append(new_line)
 
     return cleaned
+
+
+# PAN-OS prints 'show routing route' as fixed-width columns under a header
+# that names them:
+#
+#   destination      nexthop      metric flags      age   interface   next-AS
+#   10.61.82.7/32    10.2.1.1            A?B        2724             4280000001
+#
+# The age ticks every second, so a capture pair two minutes apart reports
+# every BGP route as changed - 224 of 224 lines on one firewall here, with
+# an identical route set. The header gives us the column map, so read the
+# age span off it rather than guessing a field index: 'interface' and
+# 'next-AS' are both optionally blank, which makes counting from the right
+# unreliable.
+PANOS_ROUTE_COMMANDS = ("show routing route",)
+
+PANOS_ROUTE_HEADER = re.compile(r"^destination\s+nexthop\s+.*\bage\b")
+
+PANOS_ROUTE_AGE = re.compile(r"^(\s*)(\d+)")
+
+
+def blank_panos_route_age(lines):
+    """Blank the age column of a PAN-OS routing table, tracking the header.
+
+    A wide age overruns the header's own column width - 'age' is 6 columns
+    but a 2666471-second route needs 7 - so match the number that starts in
+    the age column rather than slicing a fixed span. Requiring it to start
+    before the next column keeps a blank age from swallowing next-AS, which
+    is also numeric. One capture holds a header per virtual router, so the
+    columns are re-read each time rather than fixed once."""
+    blanked = []
+    age_start = None
+    next_start = None
+
+    for line in lines:
+        if PANOS_ROUTE_HEADER.match(line):
+            age_start = line.index("age")
+            rest = line[age_start + len("age"):]
+            gap = len(rest) - len(rest.lstrip())
+            next_start = age_start + len("age") + gap if rest.strip() else len(line)
+            blanked.append(line)
+            continue
+
+        if age_start is None or len(line) <= age_start:
+            blanked.append(line)
+            continue
+
+        match = PANOS_ROUTE_AGE.match(line[age_start:])
+
+        if match and age_start + len(match.group(1)) < next_start:
+            age = match.group(2)
+            cut = age_start + len(match.group(1))
+            blanked.append(line[:cut] + " " * len(age) + line[cut + len(age):])
+            continue
+
+        blanked.append(line)
+
+    return blanked
 
 
 # EOS "Up/Down" column formats. The timer rolls over to a coarser unit as
@@ -992,6 +1053,9 @@ def route_maps_from(sections, other_sections):
 # software and content versions, sync state, encryption, cookies - is
 # expected to match, and a mismatch is what a half-applied change
 # looks like.
+# A PAN-OS HA group header, with or without the group's local label.
+HA_GROUP_HEADER = re.compile(r"^Group\s+\d+$", re.IGNORECASE)
+
 HA_ROLE_KEYS = (
     "state",
     "priority",
@@ -1032,6 +1096,18 @@ def parse_ha_state(lines):
         if key.lower().startswith("peer information"):
             break
 
+        # "Group 1:" on one member and "Group 1: MMP-E-HA" on the other are
+        # the same block, but only the bare form looks like a block header to
+        # the rule below, so one member's leaves land under "Group 1/Local
+        # Information/Mode" and the other's under "Local Information/Mode".
+        # Every key then differs and a healthy pair reads as 26 mismatches.
+        # The label is a local name an operator typed, not synchronized
+        # state - these four firewalls carry "", "MMP-E-HA", "MMP-W-FW1" and
+        # "MMP-W-BU" - so treat the line as a header and drop the label.
+        if HA_GROUP_HEADER.match(key):
+            stack.append((indent, key))
+            continue
+
         if not value:
             stack.append((indent, key))
             continue
@@ -1045,11 +1121,49 @@ def parse_ha_state(lines):
     return values
 
 
+# Route-map lines that bias which member is preferred, rather than deciding
+# which routes match or where they go. A redundant pair is deliberately
+# asymmetric in exactly these, so they are dropped before the two members
+# are compared.
+#
+# Their *absence* is a setting too: the preferred member of this pair has no
+# prepend line at all where the backup has "set as-path prepend 4280000001",
+# so masking the value is not enough - the line has to go. Clause 30 of
+# EACN-OUT is that case, and it was 22 lines against 23.
+#
+# What stays is everything that decides reachability: the clause headers and
+# their permit/deny, every match line, set ip next-hop, set origin. Those
+# must agree, because a peer that lands on either member has to be offered
+# and accept the same routes.
+ROUTE_MAP_TUNING = re.compile(
+    r"""^(
+          description
+        | set \s+ as-path \s+ prepend
+        | set \s+ local-preference
+        | set \s+ metric
+        | set \s+ (ext)?community
+        | set \s+ weight
+    )\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def canonical_route_map(body):
+    """A route-map body with the per-member preference tuning dropped."""
+    return [
+        line.strip() for line in body
+        if not ROUTE_MAP_TUNING.match(line.strip())
+    ]
+
+
+PAIR_SYMMETRY_CATEGORY = "Pair symmetry"
+
+
 def pair_finding(classification, title, pair, subject, fields, summary, evidence, detail=None):
     """One pair-symmetry finding: Attention, attributed to both members."""
     finding = {
         "classification": classification,
-        "category": "Pair symmetry",
+        "category": PAIR_SYMMETRY_CATEGORY,
         "impact": "Attention",
         "title": title,
         "subject": [f"{pair[0]} vs {pair[1]}"] + subject,
@@ -1140,6 +1254,19 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
         if body_a == body_b:
             continue
 
+        # A redundant pair is deliberately asymmetric: you make one member
+        # preferred by prepending your own AS more times on it, or by setting
+        # a lower local-preference, and you label the result "Path 1".. "Path
+        # 4". Those differences are the design, not a defect, and on this
+        # fleet they accounted for 24 of 28 route-map findings - enough noise
+        # to bury the four real ones. So compare the bodies with the tunable
+        # values canonicalized: if the two sides match once the knob settings
+        # are set aside, the only difference is tuning and there is nothing to
+        # report. Anything that changes which routes match or where they go
+        # still differs, and still fires.
+        if canonical_route_map(body_a) == canonical_route_map(body_b):
+            continue
+
         detail = []
 
         for line in difflib.ndiff(body_a, body_b):
@@ -1173,6 +1300,31 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
                 "HA state values that should match on both members of a healthy pair differ (role-dependent "
                 "values such as State and Priority are ignored). A version, sync or cookie mismatch means "
                 "one member did not receive what the other did.",
+                ha_command,
+            ))
+
+        # The firewall grades its own content versions against its peer's and
+        # reports the verdict. Both members print the same verdict, so a
+        # Mismatch reads as agreement to the key-by-key compare above and
+        # slips through it - it needs asking for directly.
+        mismatched = sorted(
+            key for key in set(ha_a) | set(ha_b)
+            if "compatibility" in key.lower()
+            and "mismatch" in (ha_a.get(key, "") + ha_b.get(key, "")).lower()
+        )
+
+        if mismatched:
+            fields = [(key.rsplit("/", 1)[-1], ha_a.get(key, "Not Present"), ha_b.get(key, "Not Present"))
+                      for key in mismatched]
+            findings.append(pair_finding(
+                "Protocol", "Pair HA Content Version Mismatch", pair, ["high-availability"], fields,
+                f"The pair reports {len(mismatched)} content version(s) as Mismatch between the two members. "
+                "Both members print the same verdict, so this is the pair disagreeing with itself rather "
+                "than one capture differing from the other. A content version that differs across the pair "
+                "means policy that depends on it - an application, a threat signature, an IoT device "
+                "profile - can evaluate differently after a failover than before it. Compare "
+                "'show system info' on both members to find which file is behind, then push that update "
+                "to the member that is stale.",
                 ha_command,
             ))
 
@@ -1605,6 +1757,12 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
         "Action Required": 0,
     }
 
+    # impact_totals split by where the finding came from: window_totals from
+    # comparing pre against post, symmetry_totals from comparing the two
+    # members of a pair against each other.
+    window_totals = dict.fromkeys(impact_totals, 0)
+    symmetry_totals = dict.fromkeys(impact_totals, 0)
+
     # Pass 1: per-device parsing and findings.
     devices = {}
 
@@ -1670,12 +1828,23 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
             total_findings_by_classification[finding["classification"]] += 1
             impact_totals[finding["impact"]] += 1
 
+            # The health verdict answers "did this window change anything".
+            # A pair-symmetry finding is a standing condition that was just
+            # as true before the window as after, so it is counted on its
+            # own and kept out of that verdict - otherwise a maintenance
+            # that changed nothing reads as 30 problems it did not cause.
+            if finding["category"] == PAIR_SYMMETRY_CATEGORY:
+                symmetry_totals[finding["impact"]] += 1
+            else:
+                window_totals[finding["impact"]] += 1
+
             if finding["title"] in EXPECTATION_TITLES:
                 expectation_totals[EXPECTATION_TITLES[finding["title"]]] += 1
 
         if config_change_count:
             total_findings_by_classification["Configuration"] += config_change_count
             impact_totals["Changed"] += config_change_count
+            window_totals["Changed"] += config_change_count
 
         for category, count in raw_categories.items():
             if count:
@@ -1732,6 +1901,8 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
         "expectation_totals": expectation_totals,
         "total_findings_by_classification": total_findings_by_classification,
         "impact_totals": impact_totals,
+        "window_totals": window_totals,
+        "symmetry_totals": symmetry_totals,
         "devices_with_findings": devices_with_findings,
     }
 
@@ -1744,23 +1915,37 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectation
     impact_totals = analysis["impact_totals"]
     devices_with_findings = analysis["devices_with_findings"]
 
-    if impact_totals["Action Required"] > 0:
+    window_totals = analysis.get("window_totals", impact_totals)
+    symmetry_totals = analysis.get("symmetry_totals", dict.fromkeys(impact_totals, 0))
+    symmetry_count = sum(symmetry_totals.values())
+
+    # Graded on the window alone. A pair-symmetry finding is a standing
+    # condition the window did not create, so it gets its own sentence
+    # instead of turning a clean verification red.
+    if window_totals["Action Required"] > 0:
         overall_health = "Action Required"
-    elif impact_totals["Attention"] > 0:
+    elif window_totals["Attention"] > 0:
         overall_health = "Attention"
-    elif impact_totals["Changed"] > 0:
+    elif window_totals["Changed"] > 0:
         overall_health = "Changed"
     else:
         overall_health = "Stable"
 
     if overall_health == "Stable":
-        assessment_text = "No attention-level operational changes were detected. Review changed items and raw evidence as needed."
+        assessment_text = "Nothing changed between the precheck and the postcheck beyond expected churn."
     elif overall_health == "Changed":
         assessment_text = "Meaningful changes were detected, but no immediate attention markers were identified."
     elif overall_health == "Attention":
         assessment_text = "Operational changes were detected that should be reviewed. Click the Attention card to jump to items requiring review."
     else:
         assessment_text = "One or more findings may require action. Click Action Required to jump to the highest-priority items."
+
+    if symmetry_count:
+        assessment_text += (
+            f" Separately, {symmetry_count} pair-symmetry finding(s) describe how the two members of a "
+            "redundant pair differ from each other right now. They are not changes from this window - they "
+            "were as true in the precheck - and they are listed under Pair Symmetry."
+        )
 
     summary_items = []
 
@@ -2285,8 +2470,9 @@ details .diff-box {{
         <a class="card clickable" href="#device-findings"><div class="label">Network Health</div><div class="value health-{overall_health.lower().replace(" ", "-")}">{html.escape(overall_health)}</div></a>
         <a class="card clickable" href="#device-findings"><div class="label">Devices Checked</div><div class="value">{len(common_files)}</div></a>
         <a class="card clickable" href="#device-findings"><div class="label">Devices With Findings</div><div class="value">{devices_with_findings}</div></a>
-        <a class="card clickable" href="#device-findings"><div class="label">Changed</div><div class="value">{impact_totals["Changed"]}</div></a>
-        <a class="card clickable" href="#attention-items"><div class="label">Attention</div><div class="value health-attention">{impact_totals["Attention"]}</div></a>
+        <a class="card clickable" href="#device-findings"><div class="label">Changed</div><div class="value">{window_totals["Changed"]}</div></a>
+        <a class="card clickable" href="#attention-items"><div class="label">Attention</div><div class="value health-attention">{window_totals["Attention"]}</div></a>
+        <a class="card clickable" href="#attention-items"><div class="label">Pair Symmetry</div><div class="value">{symmetry_count}</div></a>
     </div>
 
     <div class="outcome-card">
