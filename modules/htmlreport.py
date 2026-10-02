@@ -38,7 +38,6 @@ import re
 from datetime import datetime
 
 from modules import difftrim, notes
-from modules import expectations as expectations_module
 from modules.layout import display_path, find_latest_folder
 from modules.textcompare import (
     VPN_FLOW_COMMANDS,
@@ -588,68 +587,25 @@ def bgp_finding(classification, category, impact, title, peer, before, after, su
     }
 
 
-# The generic caveat every prefix delta used to carry. It is still the
-# honest thing to say when nobody wrote down what the change was meant
-# to do; once an expectations file exists it is replaced by "as planned"
-# or "unexplained".
+# The caveat every prefix delta carries. A count that moved is worth
+# showing; whether it was meant to is something only the engineer knows,
+# and the notes are where that goes.
 PREFIX_DELTA_HEDGE = (
-    "That's normal if this window touched routing policy, communities, failover, or advertised routes. "
-    "Write the expected count into the expectations file and the next run will rate it for you."
+    "That's normal if this window touched routing policy, communities, failover, or advertised routes."
 )
 
 
-def prefix_delta_finding(peer, before, after, delta, expectations, evidence):
-    """Rate a prefix-count change against the device's expectations.
-
-    expectations is None when no file is in play (Changed + hedge), else
-    the list of entries for this device, possibly empty (every delta is
-    then either as planned, different from plan, or unexplained).
-    """
-    if expectations is None:
-        return bgp_finding(
-            "Routing", "BGP prefixes", "Changed", "BGP Prefix Count Changed", peer, before, after,
-            f"Prefix count changed by {delta:+d}. {PREFIX_DELTA_HEDGE}",
-            evidence,
-        )
-
-    entry = expectations_module.match_peer(expectations, peer)
-
-    if entry is None:
-        return bgp_finding(
-            "Routing", "BGP prefixes", "Attention", "BGP Prefix Count Changed With No Plan", peer, before, after,
-            f"Prefix count changed by {delta:+d}, and no entry in your expectations file covers this peer.",
-            evidence,
-        )
-
-    planned = expectations_module.describe(entry)
-    note = f" Note: {entry['note']}" if entry["note"] else ""
-    after_received = int(after["prefixes_received"]) if after["prefixes_received"].isdigit() else 0
-    met = (
-        entry.get("expected_delta") == delta
-        if "expected_delta" in entry
-        else entry.get("expected_prefixes") == after_received
-    )
-
-    if met:
-        return bgp_finding(
-            "Routing", "BGP prefixes", "Stable", "BGP Prefix Count Changed As Planned", peer, before, after,
-            f"Prefix count changed by {delta:+d}, which is what you planned for ({planned}).{note}",
-            evidence,
-        )
-
+def prefix_delta_finding(peer, before, after, delta, evidence):
+    """One prefix-count change, rated Changed with the generic caveat."""
     return bgp_finding(
-        "Routing", "BGP prefixes", "Attention", "BGP Prefix Count Missed The Plan", peer, before, after,
-        f"Prefix count changed by {delta:+d}, but you planned for {planned}.{note}",
+        "Routing", "BGP prefixes", "Changed", "BGP Prefix Count Changed", peer, before, after,
+        f"Prefix count changed by {delta:+d}. {PREFIX_DELTA_HEDGE}",
         evidence,
     )
 
 
-def bgp_neighbor_findings(pre_sections, post_sections, config_changes, expectations=None):
-    """Interpret per-peer BGP changes into impact-rated findings.
-
-    expectations: this device's entries from the expectations file, or
-    None when no file is in play (see prefix_delta_finding).
-    """
+def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
+    """Interpret per-peer BGP changes into impact-rated findings."""
     pre_bgp = parse_bgp_peers(pre_sections)
     post_bgp = parse_bgp_peers(post_sections)
 
@@ -736,28 +692,7 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes, expectati
             after_received = int(after["prefixes_received"]) if after["prefixes_received"].isdigit() else 0
             delta = after_received - before_received
 
-            findings.append(prefix_delta_finding(after, before, after, delta, expectations, detected_evidence))
-
-        elif expectations:
-            # Nothing moved on this peer. If the plan said it would, that
-            # is the change not having taken effect.
-            entry = expectations_module.match_peer(expectations, after)
-            after_received = int(after["prefixes_received"]) if after["prefixes_received"].isdigit() else 0
-            unmet = entry is not None and (
-                entry.get("expected_delta", 0) != 0
-                if "expected_delta" in entry
-                else entry.get("expected_prefixes") != after_received
-            )
-
-            if unmet:
-                note = f" Note: {entry['note']}" if entry["note"] else ""
-                findings.append(bgp_finding(
-                    "Routing", "BGP prefixes", "Attention", "Planned BGP Prefix Change Never Happened",
-                    after, before, after,
-                    f"You planned for {expectations_module.describe(entry)}, but the count didn't move - "
-                    f"{after_received} received in both captures.{note}",
-                    detected_evidence,
-                ))
+            findings.append(prefix_delta_finding(after, before, after, delta, detected_evidence))
 
     return findings
 
@@ -1726,22 +1661,11 @@ def render_finding(finding):
 
 
 # Titles produced by prefix_delta_finding() / the unmet check, so the
-# outcome summary can say "23 as planned, 1 unexplained".
-EXPECTATION_TITLES = {
-    "BGP Prefix Count Changed As Planned": "as_planned",
-    "BGP Prefix Count Missed The Plan": "differs",
-    "BGP Prefix Count Changed With No Plan": "unexplained",
-    "Planned BGP Prefix Change Never Happened": "not_met",
-}
-
-
-def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
+def analyze(precheck_folder, postcheck_folder, pairs=None):
     """Diff every common device file and roll up findings + totals.
 
     pairs: optional explicit [[host, host], ...] from the inventory; pairs
     whose hostnames differ only by a trailing number are inferred anyway.
-    expectations: entries from the expectations file, or None when no
-    file is in play (prefix deltas then keep the generic hedge).
     """
     pre_files = sorted(os.listdir(precheck_folder))
     post_files = sorted(os.listdir(postcheck_folder))
@@ -1781,10 +1705,7 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
         hostname = file_name.replace(".txt", "")
         config_changes = bgp_config_changes(pre_sections, post_sections)
         findings = (
-            bgp_neighbor_findings(
-                pre_sections, post_sections, config_changes,
-                expectations=expectations_module.for_device(expectations, hostname),
-            )
+            bgp_neighbor_findings(pre_sections, post_sections, config_changes)
             + prefix_list_findings(pre_sections, post_sections)
             + interface_findings(pre_sections, post_sections)
         )
@@ -1816,7 +1737,6 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
     # Pass 3: counts, scores and totals.
     device_reports = []
     devices_with_findings = 0
-    expectation_totals = {"as_planned": 0, "differs": 0, "unexplained": 0, "not_met": 0}
 
     for hostname, device in devices.items():
         findings = device["findings"]
@@ -1845,9 +1765,6 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
                 symmetry_totals[finding["impact"]] += 1
             else:
                 window_totals[finding["impact"]] += 1
-
-            if finding["title"] in EXPECTATION_TITLES:
-                expectation_totals[EXPECTATION_TITLES[finding["title"]]] += 1
 
         if config_change_count:
             total_findings_by_classification["Configuration"] += config_change_count
@@ -1905,8 +1822,6 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
         "device_reports": device_reports,
         "pairs": resolved_pairs,
         "pair_findings": all_pair_findings,
-        "expectations_in_play": expectations is not None,
-        "expectation_totals": expectation_totals,
         "total_findings_by_classification": total_findings_by_classification,
         "impact_totals": impact_totals,
         "window_totals": window_totals,
@@ -1915,7 +1830,7 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
     }
 
 
-def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectations_label=None, notes_text=None):
+def render_html(ticket, precheck_folder, postcheck_folder, analysis, notes_text=None):
     """Render the analysis into a single self-contained HTML page."""
     common_files = analysis["common_files"]
     device_reports = analysis["device_reports"]
@@ -1964,14 +1879,6 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectation
     if not summary_items:
         summary_items.append("Nothing worth reporting.")
 
-    if analysis.get("expectations_in_play"):
-        totals = analysis["expectation_totals"]
-        summary_items.append(
-            f"Against your expectations file: {totals['as_planned']} as planned, "
-            f"{totals['differs']} missed the plan, {totals['unexplained']} with no plan, "
-            f"{totals['not_met']} planned change(s) that never happened."
-        )
-
     attention_devices = [
         report for report in device_reports
         if report["attention_count"] > 0 or report["action_count"] > 0
@@ -1985,11 +1892,6 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectation
 
     chart_device_labels = [report["file_name"].replace(".txt", "") for report in device_reports]
     chart_device_impact = [report["impact_score"] for report in device_reports]
-
-    expectations_pill = ""
-
-    if analysis.get("expectations_in_play"):
-        expectations_pill = f'<div class="meta-pill">Expectations: {html.escape(expectations_label or "provided")}</div>'
 
     html_parts = []
 
@@ -2509,7 +2411,6 @@ details .diff-box {{
         <div class="meta-pill">Ticket: {html.escape(ticket)}</div>
         <div class="meta-pill">Precheck: {html.escape(display_path(precheck_folder))}</div>
         <div class="meta-pill">Postcheck: {html.escape(display_path(postcheck_folder))}</div>
-        {expectations_pill}
     </div>
 </div>
 
@@ -2815,15 +2716,10 @@ new Chart(document.getElementById("deviceImpactChart"), {{
     return "\n".join(html_parts)
 
 
-def build_html_report(
-    ticket, dirs, run_timestamp, console,
-    pairs=None, expectations=None, expectations_label=None, notes_text=None,
-):
+def build_html_report(ticket, dirs, run_timestamp, console, pairs=None, notes_text=None):
     """Find the latest pre/post runs and write the HTML report.
 
     pairs: optional explicit pair list from the inventory (see analyze).
-    expectations: entries from the expectations file, or None; the label
-    is the path shown in the report header.
     notes_text: the notes.md contents, or None; rendered above the
     findings (see modules/notes.py).
     """
@@ -2841,11 +2737,8 @@ def build_html_report(
     os.makedirs(dirs["compare"], exist_ok=True)
     html_report = os.path.join(dirs["compare"], f"compare_{run_timestamp}.html")
 
-    analysis = analyze(precheck_folder, postcheck_folder, pairs=pairs, expectations=expectations)
-    page = render_html(
-        ticket, precheck_folder, postcheck_folder, analysis,
-        expectations_label=expectations_label, notes_text=notes_text,
-    )
+    analysis = analyze(precheck_folder, postcheck_folder, pairs=pairs)
+    page = render_html(ticket, precheck_folder, postcheck_folder, analysis, notes_text=notes_text)
 
     with open(html_report, "w", encoding="utf-8") as file:
         file.write(page)

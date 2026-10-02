@@ -37,14 +37,6 @@ def parse_args(description, needs_inventory=True):
                 "rendered above the findings. scripts/notes.py starts one for you."
             ),
         )
-        parser.add_argument(
-            "--expectations",
-            help=(
-                "YAML file of the BGP prefix deltas you expect, per device and peer "
-                "(default: reports/<TICKET>/expectations.yml if present). A delta that matches "
-                "your plan is rated Stable; one that doesn't, or that no entry covers, is Attention."
-            ),
-        )
 
     if needs_inventory:
         parser.add_argument(

@@ -28,10 +28,11 @@ SITE-B-SW-2    Attention 1 · Action Required 0 · Impact 28
     Prefixes Received       0 → 3
     Evidence: show ip bgp summary + related BGP shutdown/no shutdown config
 
-SITE-A-SW-1    Attention 1 · Action Required 0 · Impact 31
-  BGP Prefix Count Changed With No Plan  198.18.85.240  AS4200000001
+SITE-A-SW-1    Changed 1 · Attention 0 · Impact 2
+  BGP Prefix Count Changed  198.18.85.240  AS4200000001
     Prefixes Received       248 → 53
-    Prefix count changed by -195 and no entry in the expectations file covers this peer.
+    Prefix count changed by -195. That's normal if this window touched
+    routing policy, communities, failover, or advertised routes.
 
 SITE-C-SW-2    Attention 1 · Action Required 0 · Impact 5
   Prefix-List Entry Removed  ISP-OUT  seq 40
@@ -245,9 +246,8 @@ pass `--ticket` and `--username` instead. The password is always
 prompted, never a flag.
 
 `compare.py` takes two more. `--inventory` points at the `pairs:` list
-from [Naming redundant pairs](#naming-redundant-pairs).
-`--expectations` points at the file from
-[Stating what the change should do](#stating-what-the-change-should-do).
+from [Naming redundant pairs](#naming-redundant-pairs). `--notes` points
+at the file from [Writing up the window](#writing-up-the-window).
 
 Devices are read in parallel behind a live progress bar. If one is
 unreachable, the run keeps going and writes a `<host>_FAILED.txt` so you
@@ -275,15 +275,11 @@ Interpreted findings cover:
   (`Attention`), replaced at the same sequence number (`Attention`),
   moved to a new sequence (`Changed`), added (`Stable`). A whole list
   going missing is `Attention`.
-- **Expected prefix deltas.** With an expectations file (see
-  [Stating what the change should do](#stating-what-the-change-should-do))
-  a prefix-count change that matches your entry is `Stable` ("as
-  planned"). One that misses, or that no entry covers, is `Attention`. So
-  is a change you planned for that never happened.
-
-  The outcome summary then reads "23 as planned, 1 with no plan" instead
-  of 24 identical hedges. Without a file, every delta keeps the generic
-  caveat and is rated `Changed`.
+- **Prefix-count changes.** A peer whose received or accepted count moved
+  is `Changed`, with the caveat that routing policy, communities,
+  failover, or advertised routes all move it legitimately. Whether this
+  particular move was meant to happen is a judgement, so it goes in your
+  notes rather than in a rating.
 - **Interfaces that gained an address** (`show ip interface brief`, PAN-OS
   `show interface all`, falling back to the running config and
   `show interfaces status`). An interface that gained an address and came
@@ -369,34 +365,38 @@ in whatever you pass to `--inventory`. It needs nothing else from the
 inventory. That way you can still build a report on a machine that only
 has the captured evidence.
 
-### Stating what the change should do
+### Writing up the window
 
-You usually know what a routing change should do to prefix counts. "SW-2
-learns three more transit prefixes over iBGP." "ISP-B sends the full
-table, 815 prefixes."
+The report says what changed. It can't say why you changed it, what
+surprised you, or what you only noticed afterwards - and that's the part
+a reader needs most when they pick the ticket up a month later.
 
-Write that down before or during the window, one entry per device and
-peer. Put it in `reports/<TICKET>/expectations.yml`, or anywhere and pass
-it to `compare.py` with `--expectations`:
+Start the write-up with:
 
-```yaml
-ticket: NET-DEMO                 # optional; must match when present
-expectations:
-  - device: SITE-A-SW-2          # capture hostname, case-insensitive
-    peer: 10.0.0.1               # neighbor IP or the Description column
-    expected_delta: +3           # change in prefixes received, or
-  - device: SITE-A-SW-1
-    peer: ISP-B
-    expected_prefixes: 815       # absolute prefixes received afterwards
-    note: full table minus bogons   # optional, shown in the finding
+```bash
+python3 scripts/notes.py --ticket NET-123
 ```
 
-`docs/demo/NET-DEMO/expectations.yml` is the bundled example. The demo
-uses it, so SITE-A-SW-2's `812 → 815` comes back as planned.
+That writes `reports/<TICKET>/notes.md`, seeded with the ticket, the
+window times, and the devices your captures hold, under five headings:
 
-The file only changes the HTML report. That's why the flag lives on
-`compare.py` - the quick text diff from `postcheck.py` has no interpreted
-findings to rate.
+```markdown
+## What we set out to do
+## What actually happened
+## What we missed
+## Still open
+## Would do differently
+```
+
+Fill it in with any editor. `compare.py` renders it above the machine
+findings, so the report on the ticket carries your account as well as the
+parser's. Markdown you can use: bullets, `- [ ]` and `- [x]` checkboxes,
+`` `code` ``, and `**bold**`. Open checkboxes are counted and reported.
+
+Two things it won't do. A section you leave empty is left out, and a
+template with nothing filled in renders no notes at all - the console
+says it's still blank, so a skeleton can't pass for a finished write-up.
+And it never overwrites notes you already started.
 
 ### A per-change inventory
 
@@ -446,15 +446,15 @@ modules/
   textcompare.py    normalization rules + quick .txt diff report
   htmlreport.py     BGP / prefix-list / interface / pair interpretation,
                     impact scoring, HTML dashboard
-  expectations.py   expectations.yml: expected BGP prefix deltas per peer
+  notes.py          notes.md: your write-up, rendered into the report
   layout.py         reports/<TICKET>/ directory conventions
   cli.py            shared argument handling
   redact.py         --redact-secrets: strips passwords/hashes/keys from captures
 inventory/          devices.example.yml (copy to devices.yml, gitignored)
-reports/            generated evidence, gitignored (+ hand-written expectations.yml)
+reports/            generated evidence, gitignored (+ hand-written notes.md)
 tests/              pytest suite (no device access needed)
 docs/               ARCHITECTURE.md (design decisions), sample report + screenshots,
-                    demo/NET-DEMO (fictional captures + expectations.yml used by scripts/demo.py)
+                    demo/NET-DEMO (fictional captures used by scripts/demo.py)
 .github/workflows/  ci.yml: ruff + yamllint + pytest on every push
 ```
 
@@ -481,7 +481,7 @@ parser without touching a live network. They cover:
 - prefix-list parsing and rating
 - pair inference and the symmetry checks
 - interface addresses and link state
-- the expectations file and how findings get classified
+- the notes file and how findings get classified
 - both report generators, end to end
 
 ## License

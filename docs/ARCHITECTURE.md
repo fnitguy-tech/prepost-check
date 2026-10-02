@@ -22,9 +22,9 @@ inventory/devices.yml
         +--> modules/textcompare.py   quick .txt diff (on-call view)
         +--> modules/htmlreport.py    interpreted HTML dashboard
                    ^
-  reports/<TICKET>/expectations.yml   modules/expectations.py: what the
-                                      change was meant to do to BGP
-                                      prefix counts (optional, by hand)
+  reports/<TICKET>/notes.md           modules/notes.py: your account of
+                                      the window, rendered above the
+                                      findings (optional, by hand)
 ```
 
 Capture files use `### <command> ###` section headers; both compare
@@ -115,17 +115,17 @@ whole-file.
   table, so a PAN-OS tunnel or a config-only address yields no finding
   rather than a guess.
 
-- **A hedge on every prefix delta is a hedge on none.** The generic
-  "this may be expected when ..." caveat is kept only when nobody wrote
-  down what the change should do. An expectations file (`modules/
-  expectations.py`, `reports/<TICKET>/expectations.yml` or
-  `--expectations`) lists `expected_delta` or `expected_prefixes` per
-  device and peer; a matching delta is Stable "as planned", a delta that
-  differs or has no entry is Attention, and an entry whose change did
-  not happen is Attention. A state change or session reset on the same
-  peer still outranks the expectation. The file is validated strictly
-  (exactly one of the two keys, integer values, matching ticket) because
-  a silently ignored entry would re-create the problem it solves.
+- **The tool rates what it can see; you write down what it can't.** A
+  prefix count that moved is `Changed` with the caveat that routing
+  policy, communities, failover, and advertised routes all move it
+  legitimately. Whether this particular move was meant to happen is a
+  judgement the captures do not hold, so it belongs in the notes
+  (`modules/notes.py`, `reports/<TICKET>/notes.md`) rather than in a
+  rating. An earlier version took expected deltas as a YAML file and
+  rated against them; it had no way to enter one short of hand-writing
+  the schema mid-window, and a present-but-empty file silently turned
+  every delta into Attention. The notes answer the same question without
+  asking the engineer to encode a judgement as data.
 
 - **An unreachable device is a finding, not an abort.** During a
   maintenance window, a device that stopped answering SSH is exactly

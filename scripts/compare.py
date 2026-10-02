@@ -15,10 +15,7 @@ Usage:
 
 The inventory is optional here and is read only for its "pairs:" list;
 pairs whose hostnames differ only by a trailing number (SW-1 / SW-2)
-are inferred from the captures without it. The expectations file
-(default reports/<TICKET>/expectations.yml when it exists) states the
-BGP prefix deltas the change was meant to cause, so the report can say
-"as planned" or "unexplained" instead of hedging on every delta.
+are inferred from the captures without it.
 
 The notes file (default reports/<TICKET>/notes.md) is your own account
 of the window. Whatever you write there is rendered above the machine
@@ -32,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
-from modules import expectations, htmlreport, inventory, layout, notes
+from modules import htmlreport, inventory, layout, notes
 from modules.cli import parse_args
 
 
@@ -43,13 +40,6 @@ def main():
     dirs = layout.ticket_dirs(args.ticket)
     run_timestamp = layout.timestamp()
     pairs = inventory.load_pairs(args.inventory)
-
-    expectations_path = args.expectations or dirs["expectations"]
-    expected = None
-
-    if args.expectations or os.path.exists(expectations_path):
-        expected = expectations.load_expectations(expectations_path, args.ticket)
-        console.print(f"Expectations: {layout.display_path(expectations_path)} ({len(expected)} entries)")
 
     notes_path = args.notes or dirs["notes"]
     notes_text = notes.load(notes_path)
@@ -70,8 +60,7 @@ def main():
 
     htmlreport.build_html_report(
         args.ticket, dirs, run_timestamp, console,
-        pairs=pairs, expectations=expected, expectations_label=layout.display_path(expectations_path),
-        notes_text=notes_text,
+        pairs=pairs, notes_text=notes_text,
     )
 
 

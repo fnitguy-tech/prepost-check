@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
-from modules import collect, expectations, htmlreport, layout, textcompare
+from modules import collect, htmlreport, layout, textcompare
 from modules.htmlreport import parse_sections
 
 TICKET = "NET-DEMO"
@@ -114,15 +114,7 @@ def main(console=None):
     run_timestamp = layout.timestamp()
     textcompare.write_compare_report(TICKET, dirs, run_timestamp, console)
 
-    # The scenario's expected BGP deltas, so the report can say "as
-    # planned" instead of hedging. In a real window this file is written
-    # by hand next to the captures: reports/<TICKET>/expectations.yml.
-    expected = expectations.load_expectations(expectations.EXAMPLE_EXPECTATIONS, TICKET)
-    console.print(f"Expectations: {layout.display_path(expectations.EXAMPLE_EXPECTATIONS)} ({len(expected)} entries)")
-    htmlreport.build_html_report(
-        TICKET, dirs, run_timestamp, console,
-        expectations=expected, expectations_label=layout.display_path(expectations.EXAMPLE_EXPECTATIONS),
-    )
+    htmlreport.build_html_report(TICKET, dirs, run_timestamp, console)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,6 @@ def ticket_dirs(ticket):
         "precheck": os.path.join(base, "Precheck"),
         "postcheck": os.path.join(base, "Postcheck"),
         "compare": os.path.join(base, "Compare"),
-        "expectations": os.path.join(base, "expectations.yml"),
         "notes": os.path.join(base, "notes.md"),
     }
 
