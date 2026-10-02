@@ -88,12 +88,30 @@ so it reports "No meaningful changes detected."
 ## Prefer a window to a prompt
 
 Everything below works from the terminal, and the terminal is still the
-fastest way to do it. If you'd rather click, there's a window:
+fastest way to do it. If you'd rather click, there's a window.
+
+**In your browser**, which needs nothing you don't already have:
 
 ```bash
-pip install -r requirements-gui.txt    # once
-python3 scripts/gui.py
+python3 scripts/gui.py --serve     # prints a URL, Ctrl-C to stop
 ```
+
+**As a native window**, which needs pywebview and your system's webview.
+On Linux that means the venv has to see the system GTK bindings, so it
+needs `--system-site-packages`:
+
+```bash
+sudo dnf install python3-gobject webkit2gtk4.1    # Fedora/RHEL
+# sudo apt install python3-gi gir1.2-webkit2-4.1  # Debian/Ubuntu
+
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -r requirements.txt -r requirements-gui.txt
+.venv/bin/python scripts/gui.py
+```
+
+A venv built without `--system-site-packages` can't reach those bindings,
+so the window won't open. It says so and serves your browser instead
+rather than failing.
 
 One screen runs the window - ticket, inventory, credentials, and the three
 buttons - and shows you what a capture would do before you press anything.

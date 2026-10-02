@@ -64,11 +64,16 @@ def parse_args():
 
 
 def serve(app, open_browser):
-    """Hold the server open and print how to reach it."""
-    print(f"Serving on {app.url}")
-    print("  Loopback only, and the token in that URL is required.")
-    print("  Every device command is a read-only show.")
-    print("  Ctrl-C to stop.")
+    """Hold the server open and print how to reach it.
+
+    Every print in this script is flushed. The URL carries the token and is
+    the only way in; piped into a file or a log, a buffered print leaves you
+    with a server you cannot reach and no idea why.
+    """
+    print(f"Serving on {app.url}", flush=True)
+    print("  Loopback only, and the token in that URL is required.", flush=True)
+    print("  Every device command is a read-only show.", flush=True)
+    print("  Ctrl-C to stop.", flush=True)
 
     if open_browser:
         webbrowser.open(app.url)
@@ -76,7 +81,7 @@ def serve(app, open_browser):
     try:
         app.httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopped.")
+        print("\nStopped.", flush=True)
 
 
 def window(app):
@@ -84,9 +89,9 @@ def window(app):
     try:
         import webview
     except ImportError:
-        print("The window needs pywebview, which is not installed:")
-        print("    pip install -r requirements-gui.txt")
-        print("\nServing in your browser instead.\n")
+        print("The window needs pywebview, which is not installed:", flush=True)
+        print("    pip install -r requirements-gui.txt", flush=True)
+        print("\nServing in your browser instead.\n", flush=True)
         serve(app, open_browser=True)
         return
 
@@ -96,8 +101,8 @@ def window(app):
     try:
         webview.start()
     except Exception as error:  # noqa: BLE001 - a missing GTK/WebKit backend
-        print(f"The window could not open: {error}")
-        print("\nServing in your browser instead.\n")
+        print(f"The window could not open: {error}", flush=True)
+        print("\nServing in your browser instead.\n", flush=True)
         serve(app, open_browser=True)
 
 
@@ -107,7 +112,7 @@ def main():
     try:
         app = AppServer(port=args.port)
     except OSError as error:
-        print(f"Could not start the local server: {error}")
+        print(f"Could not start the local server: {error}", flush=True)
         return 1
 
     if args.serve:
