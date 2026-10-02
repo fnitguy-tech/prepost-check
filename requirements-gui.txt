@@ -1,0 +1,12 @@
+# Optional: the desktop window for `python3 scripts/gui.py`.
+#
+# The CLI needs none of this. pywebview wraps the system webview - WebKitGTK
+# on Linux, WebView2 on Windows, WKWebView on macOS - so there is no bundled
+# browser and no build step. On Linux it also needs the system PyGObject and
+# WebKitGTK packages, which your package manager has:
+#
+#   Fedora/RHEL:  sudo dnf install python3-gobject webkit2gtk4.1
+#   Debian:       sudo apt install python3-gi gir1.2-webkit2-4.1
+#
+# Create the venv with --system-site-packages so it can see them.
+pywebview==6.2.1
