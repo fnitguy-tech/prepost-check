@@ -102,6 +102,15 @@ whole-file.
   context under "ip prefix-list ISP-OUT". Context lines are not counted
   as changes.
 
+- **A new address on a down interface is rated; an unknown link state
+  is not.** `interface_findings()` joins addresses (EOS `show ip
+  interface brief`, PAN-OS `show interface all`, then the config) with
+  link state (the same tables, then `show interfaces status`, with EOS
+  short names expanded). Gained an address and up is Stable, gained an
+  address and down is Attention. Status only ever comes from a show
+  table, so a PAN-OS tunnel or a config-only address yields no finding
+  rather than a guess.
+
 - **An unreachable device is a finding, not an abort.** During a
   maintenance window, a device that stopped answering SSH is exactly
   the kind of thing the evidence should show. Collection records it as

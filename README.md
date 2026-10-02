@@ -252,6 +252,14 @@ Interpreted findings cover:
   overwritten at the same sequence number (`Attention`), entry
   resequenced (`Changed`), entry or list added (`Stable`), list removed
   (`Attention`).
+- **Newly addressed interfaces** (`show ip interface brief`, PAN-OS
+  `show interface all`, with the running config and `show interfaces
+  status` as fallbacks): an interface that gained an IP address during
+  the window and is up is `Stable`; one that gained an address and is
+  still down is `Attention`, because the step configured cleanly and
+  still does not work. An interface whose link state the capture cannot
+  show (a PAN-OS tunnel, a config-only address with no status table) is
+  never rated.
 - **BGP-relevant config lines.** Each device's "Configuration / Policy
   Changes" section lists the changed running-config lines that shape
   BGP behaviour, under the block header they sit in: the `router bgp`
@@ -388,7 +396,7 @@ Linux / macOS (on Windows, use `py -m pytest tests/` for the second line):
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 87 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 97 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
@@ -398,8 +406,8 @@ and the test suite alone on 3.10, the documented floor.
 
 The test suite covers the normalization rules, BGP summary parsing
 (including the Up/Down formats and the reset rule), prefix-list parsing
-and rating, pair inference and symmetry checks, finding classification,
-and both report
+and rating, pair inference and symmetry checks, interface address and
+link-state parsing, finding classification, and both report
 generators end-to-end against synthetic device captures, so parser
 changes can be validated without touching a live network.
 

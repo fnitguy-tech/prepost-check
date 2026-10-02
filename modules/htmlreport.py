@@ -1105,6 +1105,255 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
     return findings
 
 
+# ---------------------------------------------------------------------------
+# Interface addresses
+#
+# An interface that gained an IP address during the window and is up in
+# the postcheck is the change working; one that gained an address and is
+# still down means the step configured cleanly and does not work.
+# ---------------------------------------------------------------------------
+
+IPV4_PREFIX = re.compile(r"^\d+\.\d+\.\d+\.\d+/\d+$")
+# EOS abbreviates names in "show interfaces status" (Et50/1) but spells
+# them out in "show ip interface brief" and the config (Ethernet50/1).
+EOS_SHORT_NAMES = {"Et": "Ethernet", "Po": "Port-Channel", "Ma": "Management", "Vl": "Vlan", "Lo": "Loopback"}
+EOS_CONFIG_INTERFACE = re.compile(r"^interface\s+(\S+)\s*$", re.IGNORECASE)
+EOS_CONFIG_ADDRESS = re.compile(r"^\s+ip address\s+(\d+\.\d+\.\d+\.\d+/\d+)", re.IGNORECASE)
+# "set network interface ethernet ethernet1/1 layer3 ip A/B" names the
+# port directly; sub-interfaces, loopbacks, tunnels and VLAN interfaces
+# are "... units <name> ip A/B".
+PANOS_CONFIG_ADDRESS = re.compile(
+    r"^set network interface (\S+) (.+?)\s+ip\s+(\d+\.\d+\.\d+\.\d+/\d+)\s*$",
+    re.IGNORECASE,
+)
+
+
+def expand_eos_name(name):
+    for short, full in EOS_SHORT_NAMES.items():
+        if name.startswith(short) and name[len(short):len(short) + 1].isdigit():
+            return full + name[len(short):]
+    return name
+
+
+def parse_ip_interface_brief(lines):
+    """EOS 'show ip interface brief' -> {name: {"address", "status"}}.
+
+    Status is "up" only when both the Status and Protocol columns say so;
+    otherwise the columns are kept verbatim ("down down", "admin down
+    down") so the finding can show them.
+    """
+    interfaces = {}
+
+    for line in lines:
+        parts = line.split()
+
+        if len(parts) < 4 or parts[0].lower() in ("interface", "address") or parts[0].startswith("-"):
+            continue
+
+        address = parts[1] if IPV4_PREFIX.match(parts[1]) else None
+
+        if address is None and parts[1].lower() != "unassigned":
+            continue
+
+        status_tokens = []
+
+        for token in parts[2:]:
+            if token.isdigit():
+                break
+            status_tokens.append(token.lower())
+
+        if not status_tokens:
+            continue
+
+        status = "up" if status_tokens == ["up", "up"] else " ".join(status_tokens)
+        interfaces[parts[0]] = {"address": address, "status": status}
+
+    return interfaces
+
+
+def parse_interfaces_status(lines):
+    """EOS 'show interfaces status' -> {full name: "up" | "<status>"}."""
+    statuses = {}
+
+    for line in lines:
+        parts = line.split()
+
+        if len(parts) < 3 or parts[0].lower() == "port" or not parts[0][:1].isalpha():
+            continue
+
+        for token in parts[1:]:
+            if token.lower() in ("connected", "notconnect", "disabled", "errdisabled", "inactive"):
+                statuses[expand_eos_name(parts[0])] = "up" if token.lower() == "connected" else token.lower()
+                break
+
+    return statuses
+
+
+def parse_interface_all(lines):
+    """PAN-OS 'show interface all' -> {name: {"address", "status"}}.
+
+    The hardware table ("name id speed/duplex/state mac") gives link
+    state per physical port; the logical table ("name id vsys zone
+    forwarding tag address") gives addresses. A sub-interface takes its
+    parent's link state; tunnel and loopback interfaces have none, so
+    their status stays None and is never rated.
+    """
+    hardware = {}
+    logical = {}
+
+    for line in lines:
+        parts = line.split()
+
+        if len(parts) < 3 or not parts[1].isdigit():
+            continue
+
+        speed_duplex_state = parts[2].split("/")
+
+        if len(speed_duplex_state) == 3 and not IPV4_PREFIX.match(parts[2]):
+            hardware[parts[0]] = speed_duplex_state[2].lower()
+        else:
+            logical[parts[0]] = parts[-1] if IPV4_PREFIX.match(parts[-1]) else None
+
+    interfaces = {}
+
+    for name, address in logical.items():
+        state = hardware.get(name, hardware.get(name.split(".")[0]))
+        interfaces[name] = {"address": address, "status": state}
+
+    for name, state in hardware.items():
+        interfaces.setdefault(name, {"address": None, "status": state})
+
+    return interfaces
+
+
+def parse_config_addresses(lines):
+    """Interface addresses from an EOS or PAN-OS (set format) config."""
+    addresses = {}
+    current = None
+
+    for line in lines:
+        panos = PANOS_CONFIG_ADDRESS.match(line)
+
+        if panos:
+            _kind, middle, address = panos.groups()
+            tokens = middle.split()
+            name = tokens[tokens.index("units") + 1] if "units" in tokens[:-1] else tokens[0]
+            addresses[name] = address
+            continue
+
+        header = EOS_CONFIG_INTERFACE.match(line)
+
+        if header:
+            current = header.group(1)
+            continue
+
+        if current is None:
+            continue
+
+        if not line[:1].isspace():
+            current = None
+            continue
+
+        address = EOS_CONFIG_ADDRESS.match(line)
+
+        if address:
+            addresses[current] = address.group(1)
+
+    return addresses
+
+
+def parse_interfaces(sections):
+    """Address + link status per interface from whatever one capture has.
+
+    Addresses come from the show tables first and the config second;
+    status only ever comes from a show table, so an interface the capture
+    cannot say is up or down gets None and no finding.
+    """
+    interfaces = {}
+    sources = []
+
+    if "show ip interface brief" in sections:
+        interfaces.update(parse_ip_interface_brief(sections["show ip interface brief"]))
+        sources.append("show ip interface brief")
+
+    if "show interface all" in sections:
+        interfaces.update(parse_interface_all(sections["show interface all"]))
+        sources.append("show interface all")
+
+    config_lines = sections.get("show running-config", []) + sections.get("show config running", [])
+
+    for name, address in parse_config_addresses(config_lines).items():
+        entry = interfaces.setdefault(name, {"address": None, "status": None})
+
+        if entry["address"] is None:
+            entry["address"] = address
+            if "running config" not in sources:
+                sources.append("running config")
+
+    if "show interfaces status" in sections:
+        statuses = parse_interfaces_status(sections["show interfaces status"])
+
+        for name, entry in interfaces.items():
+            if entry["status"] is None and name in statuses:
+                entry["status"] = statuses[name]
+                if "show interfaces status" not in sources:
+                    sources.append("show interfaces status")
+
+    return interfaces, sources
+
+
+def interface_findings(pre_sections, post_sections):
+    """Interfaces that gained an address during the window, rated by
+    whether they are up in the postcheck. Never rated when the postcheck
+    cannot say (no status column for that interface)."""
+    pre, _pre_sources = parse_interfaces(pre_sections)
+    post, sources = parse_interfaces(post_sections)
+    findings = []
+
+    for name in sorted(post):
+        after = post[name]
+        before = pre.get(name, {"address": None, "status": None})
+
+        if after["address"] is None or before["address"] is not None or after["status"] is None:
+            continue
+
+        status_before = before["status"] or "Not Present"
+        fields = [
+            ("Address", "Not Present" if name not in pre else "unassigned", after["address"]),
+            ("Status", status_before, after["status"]),
+        ]
+        evidence = " + ".join(sources)
+
+        if after["status"] == "up":
+            findings.append({
+                "classification": "Interface",
+                "category": "Interface address",
+                "impact": "Stable",
+                "title": "Newly Addressed Interface Up",
+                "subject": [name, after["address"]],
+                "fields": fields,
+                "summary": f"{name} gained {after['address']} during the window and is up in the postcheck.",
+                "evidence": evidence,
+            })
+        else:
+            findings.append({
+                "classification": "Interface",
+                "category": "Interface address",
+                "impact": "Attention",
+                "title": "Newly Addressed Interface Down",
+                "subject": [name, after["address"]],
+                "fields": fields,
+                "summary": (
+                    f"{name} gained {after['address']} during the window but is '{after['status']}' in the "
+                    "postcheck: the address was configured cleanly and the interface still does not work. "
+                    "Check the admin state, the cable or the far end before closing the window."
+                ),
+                "evidence": evidence,
+            })
+
+    return findings
+
+
 def raw_diffs(pre_sections, post_sections):
     """Normalized added/removed lines per command."""
     all_commands = sorted(set(pre_sections.keys()) | set(post_sections.keys()))
@@ -1281,6 +1530,7 @@ def analyze(precheck_folder, postcheck_folder, pairs=None):
         findings = (
             bgp_neighbor_findings(pre_sections, post_sections, config_changes)
             + prefix_list_findings(pre_sections, post_sections)
+            + interface_findings(pre_sections, post_sections)
         )
         diffs = raw_diffs(pre_sections, post_sections)
 
@@ -2046,7 +2296,10 @@ details .diff-box {{
             for finding in findings:
                 html_parts.append(render_finding(finding))
         else:
-            html_parts.append('<p class="empty">No meaningful BGP neighbor, prefix or prefix-list changes detected.</p>')
+            html_parts.append(
+                '<p class="empty">No meaningful BGP neighbor, prefix, prefix-list or interface address '
+                'changes detected.</p>'
+            )
 
         html_parts.append("""
         </div>
