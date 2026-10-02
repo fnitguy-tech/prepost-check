@@ -8,6 +8,7 @@ ticket number, so evidence for one change never mixes with another:
         Precheck/precheck_<timestamp>/<hostname>.txt   (+ .zip)
         Postcheck/postcheck_<timestamp>/<hostname>.txt (+ .zip)
         Compare/compare_<timestamp>.txt / .html
+        expectations.yml   (optional, written by hand: expected BGP deltas)
 
 Paths are anchored to the repo root (not the current working directory)
 so the scripts behave the same no matter where they are invoked from.
@@ -29,6 +30,7 @@ def ticket_dirs(ticket):
         "precheck": os.path.join(base, "Precheck"),
         "postcheck": os.path.join(base, "Postcheck"),
         "compare": os.path.join(base, "Compare"),
+        "expectations": os.path.join(base, "expectations.yml"),
     }
 
 

@@ -30,8 +30,9 @@ SITE-B-SW-2    Attention 1 · Action Required 0 · Impact 28
     Evidence: show ip bgp summary + related BGP shutdown/no shutdown config
 
 SITE-A-SW-1    Attention 1 · Action Required 0 · Impact 31
-  BGP Prefix Count Changed  198.18.85.240  AS4200000001
+  BGP Prefix Count Changed Unexpectedly  198.18.85.240  AS4200000001
     Prefixes Received       248 → 53
+    Prefix count changed by -195 and no entry in the expectations file covers this peer.
 
 SITE-C-SW-2    Attention 1 · Action Required 0 · Impact 5
   Prefix-List Entry Withdrawn  ISP-OUT  seq 40
@@ -227,7 +228,9 @@ anytime after       python3 scripts/compare.py      -> reports/<TICKET>/Compare/
 Each script prompts for the ticket number and SSH credentials (or takes
 `--ticket` / `--username`; the password is always prompted, never a
 flag). `compare.py` additionally takes `--inventory` for the `pairs:`
-list described under [Naming redundant pairs](#naming-redundant-pairs). Devices are collected in parallel with a live progress bar; an
+list described under [Naming redundant pairs](#naming-redundant-pairs)
+and `--expectations` for the file described under
+[Stating what the change should do](#stating-what-the-change-should-do). Devices are collected in parallel with a live progress bar; an
 unreachable device is recorded as a `<host>_FAILED.txt` finding instead
 of aborting the run.
 
@@ -252,6 +255,15 @@ Interpreted findings cover:
   overwritten at the same sequence number (`Attention`), entry
   resequenced (`Changed`), entry or list added (`Stable`), list removed
   (`Attention`).
+- **Expected prefix deltas.** With an expectations file (see
+  [Stating what the change should do](#stating-what-the-change-should-do))
+  a prefix-count change that matches its entry is `Stable` ("as
+  planned"), one that differs from or has no entry is `Attention`, and
+  an expected change that did not happen is `Attention`. The outcome
+  summary then reads "23 as planned, 1 unexplained" instead of 24
+  identical hedges; without a file, every delta keeps the generic
+  "this may be expected when routing policy ... changes" caveat and is
+  rated `Changed`.
 - **Newly addressed interfaces** (`show ip interface brief`, PAN-OS
   `show interface all`, with the running config and `show interfaces
   status` as fallbacks): an interface that gained an IP address during
@@ -334,6 +346,32 @@ the file exists, or the file given with `--inventory`; it needs nothing
 else from the inventory, so a report can still be built on a machine
 that only has the captured evidence.
 
+### Stating what the change should do
+
+A routing change usually has a known effect on prefix counts: "SW-2
+learns three more transit prefixes over iBGP", "ISP-B sends the full
+table, 815 prefixes". Write that down in `reports/<TICKET>/expectations.yml`
+before or during the window (or anywhere, passed to `compare.py` with
+`--expectations`), one entry per device and peer:
+
+```yaml
+ticket: NET-DEMO                 # optional; must match when present
+expectations:
+  - device: SITE-A-SW-2          # capture hostname, case-insensitive
+    peer: 10.0.0.1               # neighbor IP or the Description column
+    expected_delta: +3           # change in prefixes received, or
+  - device: SITE-A-SW-1
+    peer: ISP-B
+    expected_prefixes: 815       # absolute prefixes received afterwards
+    note: full table minus bogons   # optional, shown in the finding
+```
+
+`docs/demo/NET-DEMO/expectations.yml` is the bundled example; the demo
+uses it so SITE-A-SW-2's `812 → 815` is reported as planned. The file
+only affects the HTML report, which is why the flag lives on
+`compare.py`: the quick text diff written by `postcheck.py` has no
+interpreted findings to rate.
+
 ### A per-change inventory
 
 For one maintenance, copy the parts of `devices.yml` you need into a
@@ -378,15 +416,17 @@ modules/
   inventory.py      loads + validates inventory/devices.yml
   collect.py        parallel SSH capture (netmiko), zip packaging
   textcompare.py    normalization rules + quick .txt diff report
-  htmlreport.py     BGP interpretation, impact scoring, HTML dashboard
+  htmlreport.py     BGP / prefix-list / interface / pair interpretation,
+                    impact scoring, HTML dashboard
+  expectations.py   expectations.yml: expected BGP prefix deltas per peer
   layout.py         reports/<TICKET>/ directory conventions
   cli.py            shared argument handling
   redact.py         --redact-secrets: strips passwords/hashes/keys from captures
 inventory/          devices.example.yml (copy to devices.yml, gitignored)
-reports/            generated evidence, gitignored
+reports/            generated evidence, gitignored (+ hand-written expectations.yml)
 tests/              pytest suite (no device access needed)
 docs/               ARCHITECTURE.md (design decisions), sample report + screenshots,
-                    demo/NET-DEMO (fictional captures used by scripts/demo.py)
+                    demo/NET-DEMO (fictional captures + expectations.yml used by scripts/demo.py)
 .github/workflows/  ci.yml: ruff + yamllint + pytest on every push
 ```
 
@@ -396,7 +436,7 @@ Linux / macOS (on Windows, use `py -m pytest tests/` for the second line):
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 97 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 117 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
@@ -407,7 +447,8 @@ and the test suite alone on 3.10, the documented floor.
 The test suite covers the normalization rules, BGP summary parsing
 (including the Up/Down formats and the reset rule), prefix-list parsing
 and rating, pair inference and symmetry checks, interface address and
-link-state parsing, finding classification, and both report
+link-state parsing, the expectations file, finding classification, and
+both report
 generators end-to-end against synthetic device captures, so parser
 changes can be validated without touching a live network.
 

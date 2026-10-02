@@ -21,6 +21,10 @@ inventory/devices.yml
         |
         +--> modules/textcompare.py   quick .txt diff (on-call view)
         +--> modules/htmlreport.py    interpreted HTML dashboard
+                   ^
+  reports/<TICKET>/expectations.yml   modules/expectations.py: what the
+                                      change was meant to do to BGP
+                                      prefix counts (optional, by hand)
 ```
 
 Capture files use `### <command> ###` section headers; both compare
@@ -110,6 +114,18 @@ whole-file.
   address and down is Attention. Status only ever comes from a show
   table, so a PAN-OS tunnel or a config-only address yields no finding
   rather than a guess.
+
+- **A hedge on every prefix delta is a hedge on none.** The generic
+  "this may be expected when ..." caveat is kept only when nobody wrote
+  down what the change should do. An expectations file (`modules/
+  expectations.py`, `reports/<TICKET>/expectations.yml` or
+  `--expectations`) lists `expected_delta` or `expected_prefixes` per
+  device and peer; a matching delta is Stable "as planned", a delta that
+  differs or has no entry is Attention, and an entry whose change did
+  not happen is Attention. A state change or session reset on the same
+  peer still outranks the expectation. The file is validated strictly
+  (exactly one of the two keys, integer values, matching ticket) because
+  a silently ignored entry would re-create the problem it solves.
 
 - **An unreachable device is a finding, not an abort.** During a
   maintenance window, a device that stopped answering SSH is exactly

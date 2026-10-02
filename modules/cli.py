@@ -29,6 +29,14 @@ def parse_args(description, needs_inventory=True):
                 "only by a trailing number are inferred anyway)"
             ),
         )
+        parser.add_argument(
+            "--expectations",
+            help=(
+                "YAML file of expected BGP prefix deltas per device and peer "
+                "(default: reports/<TICKET>/expectations.yml if present). Matching deltas "
+                "are rated Stable, unmatched or unexplained ones Attention."
+            ),
+        )
 
     if needs_inventory:
         parser.add_argument(
