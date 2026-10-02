@@ -29,7 +29,7 @@ SITE-B-SW-2    Attention 1 · Action Required 0 · Impact 28
     Evidence: show ip bgp summary + related BGP shutdown/no shutdown config
 
 SITE-A-SW-1    Attention 1 · Action Required 0 · Impact 31
-  BGP Prefix Count Changed Unexpectedly  198.18.85.240  AS4200000001
+  BGP Prefix Count Changed With No Plan  198.18.85.240  AS4200000001
     Prefixes Received       248 → 53
     Prefix count changed by -195 and no entry in the expectations file covers this peer.
 
@@ -281,10 +281,10 @@ Interpreted findings cover:
   planned"). One that misses, or that no entry covers, is `Attention`. So
   is a change you planned for that never happened.
 
-  The outcome summary then reads "23 as planned, 1 unexplained" instead
+  The outcome summary then reads "23 as planned, 1 with no plan" instead
   of 24 identical hedges. Without a file, every delta keeps the generic
   caveat and is rated `Changed`.
-- **Newly addressed interfaces** (`show ip interface brief`, PAN-OS
+- **Interfaces that gained an address** (`show ip interface brief`, PAN-OS
   `show interface all`, falling back to the running config and
   `show interfaces status`). An interface that gained an address and came
   up is `Stable`. One that gained an address and stayed down is

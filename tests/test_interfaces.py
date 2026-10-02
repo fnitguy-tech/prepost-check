@@ -140,7 +140,7 @@ def test_newly_addressed_interface_that_is_up_is_stable():
 
     findings = interface_findings(pre, post)
 
-    assert [(f["title"], f["impact"]) for f in findings] == [("Newly Addressed Interface Up", "Stable")]
+    assert [(f["title"], f["impact"]) for f in findings] == [("New Address, Interface Up", "Stable")]
     assert ("Address", "unassigned", "10.24.0.1/24") in findings[0]["fields"]
     assert ("Status", "admin down down", "up") in findings[0]["fields"]
 

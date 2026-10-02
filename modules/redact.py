@@ -1,4 +1,4 @@
-"""Strip passwords, hashes and other secrets from captured output.
+"""Strip passwords, hashes, and other secrets from captured output.
 
 Off by default. precheck.py / postcheck.py enable it with
 --redact-secrets, and the collector then runs every command's output

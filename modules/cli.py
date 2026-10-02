@@ -52,8 +52,8 @@ def parse_args(description, needs_inventory=True):
             action="store_true",
             help=(
                 "Replace passwords, password hashes, SNMP communities, "
-                "TACACS/RADIUS/BGP/OSPF keys and PAN-OS encrypted values "
-                "with <REDACTED> before the capture is written to disk"
+                "TACACS/RADIUS/BGP/OSPF keys, and PAN-OS encrypted values "
+                "with <REDACTED> before anything is written to disk"
             ),
         )
 

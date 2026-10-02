@@ -613,8 +613,8 @@ def prefix_delta_finding(peer, before, after, delta, expectations, evidence):
 
     if entry is None:
         return bgp_finding(
-            "Routing", "BGP prefixes", "Attention", "BGP Prefix Count Changed Unexpectedly", peer, before, after,
-            f"Prefix count changed by {delta:+d} and no entry in the expectations file covers this peer.",
+            "Routing", "BGP prefixes", "Attention", "BGP Prefix Count Changed With No Plan", peer, before, after,
+            f"Prefix count changed by {delta:+d}, and no entry in your expectations file covers this peer.",
             evidence,
         )
 
@@ -635,7 +635,7 @@ def prefix_delta_finding(peer, before, after, delta, expectations, evidence):
         )
 
     return bgp_finding(
-        "Routing", "BGP prefixes", "Attention", "BGP Prefix Count Differs From Expectation", peer, before, after,
+        "Routing", "BGP prefixes", "Attention", "BGP Prefix Count Missed The Plan", peer, before, after,
         f"Prefix count changed by {delta:+d}, but you planned for {planned}.{note}",
         evidence,
     )
@@ -749,10 +749,10 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes, expectati
             if unmet:
                 note = f" Note: {entry['note']}" if entry["note"] else ""
                 findings.append(bgp_finding(
-                    "Routing", "BGP prefixes", "Attention", "Expected BGP Prefix Change Did Not Happen",
+                    "Routing", "BGP prefixes", "Attention", "Planned BGP Prefix Change Never Happened",
                     after, before, after,
-                    f"The expectation was {expectations_module.describe(entry)}, but the prefix count did not "
-                    f"change ({after_received} received in both captures).{note}",
+                    f"You planned for {expectations_module.describe(entry)}, but the count didn't move - "
+                    f"{after_received} received in both captures.{note}",
                     detected_evidence,
                 ))
 
@@ -1560,7 +1560,7 @@ def interface_findings(pre_sections, post_sections):
                 "classification": "Interface",
                 "category": "Interface address",
                 "impact": "Stable",
-                "title": "Newly Addressed Interface Up",
+                "title": "New Address, Interface Up",
                 "subject": [name, after["address"]],
                 "fields": fields,
                 "summary": f"{name} gained {after['address']} during the window and is up in the postcheck.",
@@ -1670,7 +1670,7 @@ def render_diff_line(kind, text):
 
 def render_finding(finding):
     """Render one finding of any kind: badge, title, subject spans, the
-    before/after grid built from its fields, summary, evidence and any
+    before/after grid built from its fields, summary, evidence, and any
     raw detail lines."""
     impact = finding["impact"]
     arrow = finding.get("arrow", "→")
@@ -1726,9 +1726,9 @@ def render_finding(finding):
 # outcome summary can say "23 as planned, 1 unexplained".
 EXPECTATION_TITLES = {
     "BGP Prefix Count Changed As Planned": "as_planned",
-    "BGP Prefix Count Differs From Expectation": "differs",
-    "BGP Prefix Count Changed Unexpectedly": "unexplained",
-    "Expected BGP Prefix Change Did Not Happen": "not_met",
+    "BGP Prefix Count Missed The Plan": "differs",
+    "BGP Prefix Count Changed With No Plan": "unexplained",
+    "Planned BGP Prefix Change Never Happened": "not_met",
 }
 
 
@@ -1964,9 +1964,9 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectation
     if analysis.get("expectations_in_play"):
         totals = analysis["expectation_totals"]
         summary_items.append(
-            f"BGP prefix deltas against the expectations file: {totals['as_planned']} as planned, "
-            f"{totals['differs']} different from plan, {totals['unexplained']} unexplained, "
-            f"{totals['not_met']} expected change(s) that did not happen."
+            f"Against your expectations file: {totals['as_planned']} as planned, "
+            f"{totals['differs']} missed the plan, {totals['unexplained']} with no plan, "
+            f"{totals['not_met']} planned change(s) that never happened."
         )
 
     attention_devices = [
@@ -2598,7 +2598,7 @@ details .diff-box {{
                 html_parts.append(render_finding(finding))
         else:
             html_parts.append(
-                '<p class="empty">No meaningful BGP neighbor, prefix, prefix-list or interface address '
+                '<p class="empty">No meaningful BGP neighbor, prefix, prefix-list, or interface address '
                 'changes detected.</p>'
             )
 

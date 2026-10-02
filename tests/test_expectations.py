@@ -125,7 +125,7 @@ def test_matching_absolute_count_by_ip_is_stable_with_note():
 def test_delta_that_differs_from_plan_is_attention():
     findings = bgp_neighbor_findings(_sections(812), _sections(814), [], expectations=[_entry("ISP-B", expected_delta=3)])
 
-    assert [(f["title"], f["impact"]) for f in findings] == [("BGP Prefix Count Differs From Expectation", "Attention")]
+    assert [(f["title"], f["impact"]) for f in findings] == [("BGP Prefix Count Missed The Plan", "Attention")]
     assert "changed by +2, but you planned for a change of +3" in findings[0]["summary"]
 
 
@@ -133,7 +133,7 @@ def test_delta_with_no_entry_is_unexplained_attention():
     # A file exists but covers a different peer: this delta is unexplained.
     findings = bgp_neighbor_findings(_sections(812), _sections(815), [], expectations=[_entry("ISP-A", expected_delta=3)])
 
-    assert [(f["title"], f["impact"]) for f in findings] == [("BGP Prefix Count Changed Unexpectedly", "Attention")]
+    assert [(f["title"], f["impact"]) for f in findings] == [("BGP Prefix Count Changed With No Plan", "Attention")]
     assert PREFIX_DELTA_HEDGE not in findings[0]["summary"]
 
     # An empty list (file present, nothing for this device) is the same.
@@ -143,7 +143,7 @@ def test_delta_with_no_entry_is_unexplained_attention():
 def test_expected_change_that_did_not_happen_is_attention():
     findings = bgp_neighbor_findings(_sections(812), _sections(812), [], expectations=[_entry("ISP-B", expected_delta=3)])
 
-    assert [(f["title"], f["impact"]) for f in findings] == [("Expected BGP Prefix Change Did Not Happen", "Attention")]
+    assert [(f["title"], f["impact"]) for f in findings] == [("Planned BGP Prefix Change Never Happened", "Attention")]
 
     # An expectation of "no change" or of the count it already has is met.
     assert bgp_neighbor_findings(_sections(812), _sections(812), [], expectations=[_entry("ISP-B", expected_delta=0)]) == []
@@ -207,9 +207,9 @@ def test_expectations_reach_the_report_header_and_summary(tmp_path):
         content = report.read()
 
     assert "Expectations: reports/NET-5/expectations.yml" in content
-    assert "1 as planned, 0 different from plan, 1 unexplained" in content
+    assert "1 as planned, 0 missed the plan, 1 with no plan" in content
     assert "BGP Prefix Count Changed As Planned" in content
-    assert "BGP Prefix Count Changed Unexpectedly" in content
+    assert "BGP Prefix Count Changed With No Plan" in content
     assert 'health-attention">Attention' in content
 
 
