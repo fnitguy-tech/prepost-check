@@ -91,6 +91,17 @@ whole-file.
   the inventory's optional `pairs:` list covers the rest, and compare.py
   reads the inventory for that list only, so it still works without one.
 
+- **"BGP-relevant" config means the policy objects, not just the
+  `router bgp` block.** `BGP_CONFIG_KEYWORDS` in `htmlreport.py` names
+  them (prefix-list, access-list/-group, peer-group, redistribution,
+  bfd, link-state, PAN-OS `protocol bgp`, `valid-networks`,
+  `auth-profile`, `used-by`, ...). Because EOS puts the keyword on the
+  block header and the change on an indented line under it, the diff
+  walk tracks the enclosing header per side of the ndiff and emits it
+  as a context line, so "- seq 40 permit ..." arrives in the BGP
+  context under "ip prefix-list ISP-OUT". Context lines are not counted
+  as changes.
+
 - **An unreachable device is a finding, not an abort.** During a
   maintenance window, a device that stopped answering SSH is exactly
   the kind of thing the evidence should show. Collection records it as

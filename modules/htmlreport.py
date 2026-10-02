@@ -396,36 +396,95 @@ def parse_bgp_peers(sections):
     return peers
 
 
+# Substrings that make a changed running-config line BGP-relevant. The
+# list covers the policy objects a peer's behaviour is built from, not
+# just the "router bgp" block: on EOS a prefix-list, access-list,
+# peer-group, redistribution, BFD or link-state edit changes what a peer
+# sends or accepts without touching a "neighbor" line, and on PAN-OS
+# "valid-networks" and "used-by" (under "protocol bgp") are how routes
+# are filtered and policies attached. Lowercased before matching.
+BGP_CONFIG_KEYWORDS = [
+    "router bgp",
+    "protocol bgp",
+    "neighbor",
+    "peer-group",
+    "peer group",
+    "route-map",
+    "prefix-list",
+    "access-list",
+    "access-group",
+    "community",
+    "send-community",
+    "set community",
+    "match community",
+    "redist",
+    "aggregate-address",
+    "valid-networks",
+    "auth-profile",
+    "used-by",
+    "bfd",
+    "link-state",
+    "shutdown",
+    "no shutdown",
+]
+
+
 def bgp_config_changes(pre_sections, post_sections):
-    """BGP-relevant lines that changed in the running config."""
-    keywords = [
-        "router bgp",
-        "neighbor",
-        "route-map",
-        "community",
-        "send-community",
-        "set community",
-        "match community",
-        "shutdown",
-        "no shutdown",
-    ]
+    """BGP-relevant lines that changed in the running config.
+
+    Returns ndiff-style lines: "- " removed, "+ " added, and "  " context
+    for the block header ("ip prefix-list ISP-OUT", "router bgp 64500")
+    an indented change sits under. The header is what makes an indented
+    "seq 40 permit ..." line BGP-relevant, and what makes it readable.
+    """
+    keywords = BGP_CONFIG_KEYWORDS
 
     pre_lines = pre_sections.get("show running-config", []) + pre_sections.get("show config running", [])
     post_lines = post_sections.get("show running-config", []) + post_sections.get("show config running", [])
 
     diff = difflib.ndiff(pre_lines, post_lines)
     important = []
+    # ndiff interleaves the two sides, so each side keeps its own notion
+    # of "the block this line is under": a removed line belongs to the
+    # precheck's last header, an added line to the postcheck's.
+    headers = {"- ": "", "+ ": ""}
+    emitted_header = None
 
     for line in diff:
+        if line.startswith("? "):
+            continue
+
+        text = line[2:]
+        sides = ["- ", "+ "] if line.startswith("  ") else [line[:2]]
+
+        if text.strip() and not text[0].isspace():
+            for side in sides:
+                headers[side] = text
+
         if not line.startswith(("- ", "+ ")):
             continue
 
-        content = line[2:].strip().lower()
+        content = text.strip().lower()
+        indented = text[:1].isspace()
+        block_header = headers[line[:2]]
+        in_relevant_block = indented and any(keyword in block_header.lower() for keyword in keywords)
 
-        if any(keyword in content for keyword in keywords):
+        if any(keyword in content for keyword in keywords) or in_relevant_block:
+            if indented and block_header != emitted_header:
+                important.append(f"  {block_header}")
+                emitted_header = block_header
+            elif not indented:
+                # A changed header line is its own context for what follows.
+                emitted_header = text
+
             important.append(line)
 
     return important
+
+
+def count_config_changes(config_changes):
+    """Added/removed lines only; block-header context lines do not count."""
+    return sum(1 for line in config_changes if line.startswith(("- ", "+ ")))
 
 
 def bgp_finding(classification, category, impact, title, peer, before, after, summary, evidence):
@@ -500,6 +559,8 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
 
         if after["ip"].lower() in config_text and "shutdown" in config_text:
             detected_evidence = "show ip bgp summary + related BGP shutdown/no shutdown config"
+        elif "prefix-list" in config_text or "valid-networks" in config_text:
+            detected_evidence = "show ip bgp summary + BGP prefix-list/valid-networks config"
         elif "community" in config_text or "route-map" in config_text:
             detected_evidence = "show ip bgp summary + BGP route-map/community config"
 
@@ -1123,8 +1184,7 @@ def classify_raw_diff_commands(diffs):
 
 
 def render_diff_line(kind, text):
-    css = "added" if kind == "added" else "removed"
-    sign = "+" if kind == "added" else "-"
+    css, sign = {"added": ("added", "+"), "removed": ("removed", "-")}.get(kind, ("context", " "))
     return f'<div class="{css}">{sign} {html.escape(text)}</div>'
 
 
@@ -1256,7 +1316,8 @@ def analyze(precheck_folder, postcheck_folder, pairs=None):
         config_changes = device["config_changes"]
         raw_categories = device["raw_categories"]
 
-        findings_count = len(findings) + len(config_changes)
+        config_change_count = count_config_changes(config_changes)
+        findings_count = len(findings) + config_change_count
 
         if findings_count > 0:
             devices_with_findings += 1
@@ -1268,9 +1329,9 @@ def analyze(precheck_folder, postcheck_folder, pairs=None):
             total_findings_by_classification[finding["classification"]] += 1
             impact_totals[finding["impact"]] += 1
 
-        if config_changes:
-            total_findings_by_classification["Configuration"] += len(config_changes)
-            impact_totals["Changed"] += len(config_changes)
+        if config_change_count:
+            total_findings_by_classification["Configuration"] += config_change_count
+            impact_totals["Changed"] += config_change_count
 
         for category, count in raw_categories.items():
             if count:
@@ -1287,7 +1348,7 @@ def analyze(precheck_folder, postcheck_folder, pairs=None):
             device_action_count * 10
             + device_attention_count * 5
             + device_changed_count * 2
-            + len(config_changes) * 2
+            + config_change_count * 2
             + raw_categories["Interface"] * 4
             + device_stable_count
         )
@@ -1782,6 +1843,12 @@ a {{
     white-space: pre-wrap;
 }}
 
+.context {{
+    color: var(--muted);
+    font-family: Consolas, monospace;
+    white-space: pre-wrap;
+}}
+
 details {{
     margin-top: 10px;
     border: 1px solid var(--line);
@@ -1995,6 +2062,8 @@ details .diff-box {{
                     html_parts.append(render_diff_line("added", line[2:]))
                 elif line.startswith("- "):
                     html_parts.append(render_diff_line("removed", line[2:]))
+                else:
+                    html_parts.append(render_diff_line("context", line[2:]))
         else:
             html_parts.append('<p class="empty">No BGP-related config changes detected.</p>')
 

@@ -252,6 +252,16 @@ Interpreted findings cover:
   overwritten at the same sequence number (`Attention`), entry
   resequenced (`Changed`), entry or list added (`Stable`), list removed
   (`Attention`).
+- **BGP-relevant config lines.** Each device's "Configuration / Policy
+  Changes" section lists the changed running-config lines that shape
+  BGP behaviour, under the block header they sit in: the `router bgp`
+  / `protocol bgp` block, `neighbor`, `peer-group`, `route-map`,
+  `prefix-list`, `access-list` / `access-group`, communities,
+  redistribution, `aggregate-address`, `bfd`, `link-state`, `shutdown`,
+  and PAN-OS `valid-networks`, `auth-profile` and `used-by`. A
+  `seq 40 permit ...` line removed inside an `ip prefix-list` block is
+  shown as such, and a prefix-count change on a peer cites that config
+  change as its evidence.
 - **Pair symmetry.** Redundant pairs are inferred from hostnames that
   differ only by a trailing number (`SITE-A-SW-1` / `SITE-A-SW-2`,
   `SITE-A-FW-1` / `SITE-A-FW-2`) or listed explicitly under `pairs:` in
@@ -378,7 +388,7 @@ Linux / macOS (on Windows, use `py -m pytest tests/` for the second line):
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 82 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 87 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
