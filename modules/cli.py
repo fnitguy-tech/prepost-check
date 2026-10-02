@@ -10,12 +10,25 @@ import argparse
 
 
 def parse_args(description, needs_inventory=True):
+    """needs_inventory=True adds the collection flags (inventory, username,
+    redaction). The compare script passes False and gets only an optional
+    --inventory, read for its pairs: list and nothing else."""
     parser = argparse.ArgumentParser(description=description)
 
     parser.add_argument(
         "--ticket",
         help="Change/Jira ticket number (prompted if omitted)",
     )
+
+    if not needs_inventory:
+        parser.add_argument(
+            "--inventory",
+            help=(
+                "Inventory YAML whose 'pairs:' list names redundant pairs to compare "
+                "(default: inventory/devices.yml if present; pairs whose hostnames differ "
+                "only by a trailing number are inferred anyway)"
+            ),
+        )
 
     if needs_inventory:
         parser.add_argument(

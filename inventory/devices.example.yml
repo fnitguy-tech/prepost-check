@@ -16,6 +16,16 @@
 # only changes how the running config is DISPLAYED (as set commands,
 # which diff far better than the default XML-ish tree) - it does not
 # modify the device.
+#
+# Optional "pairs:" names redundant pairs whose postcheck captures the
+# HTML report compares against each other (same-named prefix-lists and
+# route-maps, PAN-OS HA state). Pairs whose hostnames differ only by a
+# trailing number (SITE-A-SW-1 / SITE-A-SW-2) are inferred from the
+# capture file names without being listed; list the ones that are not:
+#
+# pairs:
+#   - [CORE-EAST, CORE-WEST]
+#   - [EDGE-FW-PRIMARY, EDGE-FW-SECONDARY]
 
 platforms:
   - name: arista

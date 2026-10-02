@@ -7,6 +7,7 @@ from modules.inventory import (
     InventoryError,
     build_jobs,
     load_inventory,
+    load_pairs,
 )
 
 
@@ -48,3 +49,31 @@ def test_malformed_inventory_rejected(tmp_path):
 
     with pytest.raises(InventoryError):
         load_inventory(str(bad))
+
+
+def test_load_pairs_is_optional(tmp_path):
+    assert load_pairs(os.path.join(str(tmp_path), "missing.yml")) == []
+
+    plain = tmp_path / "plain.yml"
+    plain.write_text("platforms:\n  - name: arista\n    device_type: arista_eos\n    hosts: [a]\n    commands: [show version]\n")
+    assert load_pairs(str(plain)) == []
+
+
+def test_load_pairs_reads_and_validates(tmp_path):
+    good = tmp_path / "good.yml"
+    good.write_text("pairs:\n  - [CORE-EAST, CORE-WEST]\n  - [FW-A, FW-B]\n")
+    assert load_pairs(str(good)) == [["CORE-EAST", "CORE-WEST"], ["FW-A", "FW-B"]]
+
+    bad = tmp_path / "bad.yml"
+    bad.write_text("pairs:\n  - [ONLY-ONE]\n")
+    with pytest.raises(InventoryError):
+        load_pairs(str(bad))
+
+    # load_inventory applies the same check so a typo fails before collection.
+    bad_inventory = tmp_path / "bad_inventory.yml"
+    bad_inventory.write_text(
+        "pairs: CORE-EAST\nplatforms:\n  - name: arista\n    device_type: arista_eos\n"
+        "    hosts: [a]\n    commands: [show version]\n"
+    )
+    with pytest.raises(InventoryError):
+        load_inventory(str(bad_inventory))

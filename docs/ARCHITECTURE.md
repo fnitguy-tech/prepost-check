@@ -77,6 +77,20 @@ whole-file.
   `show routing protocol bgp peer` blocks are parsed into the same
   per-peer dicts so firewall peers get the same findings.
 
+- **Pairs are compared against each other, not just against their own
+  precheck.** A change applied to one member of a redundant pair leaves
+  "SW-1 and SW-2 now disagree" as its real signature, which a strictly
+  per-device report cannot see. `analyze()` therefore runs in passes:
+  per-device findings first, then pair symmetry on the two postcheck
+  captures (same-named prefix-lists and route-maps entry for entry,
+  PAN-OS HA state minus role-dependent keys), then counts. A pair
+  finding is appended to both members (both devices' attention counts
+  and impact scores rise) but counted once in the network totals. Pairs
+  are inferred from hostnames differing only by a trailing number;
+  bare-IP capture names and groups of three or more are never paired;
+  the inventory's optional `pairs:` list covers the rest, and compare.py
+  reads the inventory for that list only, so it still works without one.
+
 - **An unreachable device is a finding, not an abort.** During a
   maintenance window, a device that stopped answering SSH is exactly
   the kind of thing the evidence should show. Collection records it as

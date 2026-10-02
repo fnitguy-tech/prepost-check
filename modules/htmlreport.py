@@ -751,6 +751,299 @@ def prefix_list_findings(pre_sections, post_sections):
     return findings
 
 
+# ---------------------------------------------------------------------------
+# Pair symmetry
+#
+# A redundant pair (SW-1 / SW-2, FW-1 / FW-2) is supposed to carry the same
+# policy. The per-device findings cannot see "SW-1 and SW-2 now disagree",
+# which is the real signature of a change applied to one member only, so
+# the two postcheck captures are compared against each other as well.
+# ---------------------------------------------------------------------------
+
+PAIR_SUFFIX = re.compile(r"^(.*?)(\d+)$")
+IPV4_NAME = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+
+
+def infer_pairs(hostnames):
+    """Pairs of hostnames that differ only by a trailing number.
+
+    SITE-A-SW-1 / SITE-A-SW-2 pair up; SITE-B-SW-1 alone does not; a
+    group of three or more (LEAF-1/2/3) is not a pair and is left alone
+    rather than guessed at. A capture named after a bare management IP
+    (the collector's fallback for platforms it cannot ask for a hostname)
+    is never paired: 192.0.2.11 and 192.0.2.12 share a stem by accident.
+    """
+    groups = {}
+
+    for hostname in hostnames:
+        match = PAIR_SUFFIX.match(hostname)
+
+        if match and not IPV4_NAME.match(hostname):
+            groups.setdefault(match.group(1).lower(), []).append(hostname)
+
+    return [tuple(sorted(members)) for _stem, members in sorted(groups.items()) if len(members) == 2]
+
+
+def resolve_pairs(hostnames, explicit=None):
+    """Explicit inventory pairs (where both members were captured) plus
+    inferred pairs for the devices the explicit list does not mention."""
+    by_lower = {hostname.lower(): hostname for hostname in hostnames}
+    pairs = []
+    claimed = set()
+
+    for pair in explicit or []:
+        members = [by_lower.get(str(host).lower()) for host in pair]
+
+        if all(members) and members[0] != members[1]:
+            pairs.append(tuple(sorted(members)))
+            claimed.update(members)
+
+    for pair in infer_pairs([host for host in hostnames if host not in claimed]):
+        pairs.append(pair)
+
+    return pairs
+
+
+ROUTE_MAP_HEADER = re.compile(r"^\s*route-map\s+(\S+?),?(\s+.*)?$", re.IGNORECASE)
+ROUTE_MAP_HIT_LINES = re.compile(r"^\s*(Match|Set)?\s*clauses?\s+hit", re.IGNORECASE)
+
+
+def parse_route_maps(lines):
+    """Parse 'show route-map' (or the config's route-map blocks) into
+    {name: [normalized lines]}, hit counters dropped, whitespace collapsed,
+    so two captures of the same policy compare equal line for line."""
+    maps = {}
+    current = None
+
+    for line in lines:
+        header = ROUTE_MAP_HEADER.match(line)
+
+        if header:
+            current = header.group(1)
+            rest = " ".join((header.group(2) or "").replace(",", " ").split())
+            maps.setdefault(current, []).append(f"route-map {rest}".strip())
+            continue
+
+        if current is None:
+            continue
+
+        if not line.strip():
+            continue
+
+        if not line.startswith((" ", "\t")):
+            # Non-indented, not a header: the block (or the section) ended.
+            current = None
+            continue
+
+        if ROUTE_MAP_HIT_LINES.match(line):
+            continue
+
+        maps[current].append(" ".join(PREFIX_LIST_HITS.sub("", line).split()))
+
+    return maps
+
+
+def route_maps_from(sections, other_sections):
+    """Route-maps for one capture, from the same source as its partner."""
+    if "show route-map" in sections and "show route-map" in other_sections:
+        return parse_route_maps(sections["show route-map"]), "show route-map"
+
+    return parse_route_maps(sections.get("show running-config", [])), "show running-config"
+
+
+# PAN-OS "show high-availability state" keys that differ between the two
+# members of a healthy pair by design (one is active, one passive; each
+# has its own addresses, serial and timers). Everything else - mode,
+# software and content versions, sync state, encryption, cookies - is
+# expected to match, and a mismatch is what a half-applied change
+# looks like.
+HA_ROLE_KEYS = (
+    "state",
+    "priority",
+    "address",
+    "mac",
+    "serial",
+    "hostname",
+    "last ",
+    "duration",
+    "time",
+    "connection",
+    "preempt hold",
+    "uptime",
+)
+
+
+def parse_ha_state(lines):
+    """Local-side key/value lines of 'show high-availability state' as
+    {"Block/Key": value}, stopping at the Peer Information block (which
+    describes the other member and is compared from its own capture)."""
+    values = {}
+    stack = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if not stripped or ":" not in stripped:
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        key, _sep, value = stripped.partition(":")
+        key = key.strip()
+        value = value.strip()
+
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+
+        if key.lower().startswith("peer information"):
+            break
+
+        if not value:
+            stack.append((indent, key))
+            continue
+
+        if any(role_key in key.lower() for role_key in HA_ROLE_KEYS):
+            continue
+
+        path = "/".join([name for _indent, name in stack] + [key])
+        values[path] = value
+
+    return values
+
+
+def pair_finding(classification, title, pair, subject, fields, summary, evidence, detail=None):
+    """One pair-symmetry finding: Attention, attributed to both members."""
+    finding = {
+        "classification": classification,
+        "category": "Pair symmetry",
+        "impact": "Attention",
+        "title": title,
+        "subject": [f"{pair[0]} vs {pair[1]}"] + subject,
+        "fields": fields,
+        "arrow": "vs",
+        "summary": summary,
+        "evidence": evidence,
+        "devices": list(pair),
+    }
+
+    if detail:
+        finding["detail"] = detail
+
+    return finding
+
+
+def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
+    """Compare the two postcheck captures of a pair.
+
+    Only commands present in both captures are compared. Same-named
+    prefix-lists and route-maps must match entry for entry; a list that
+    both members had in the precheck but only one has now is reported
+    too, since that is what a list deleted on one side looks like.
+    """
+    a, b = pair
+    findings = []
+    pre_a = pre_a if pre_a is not None else {}
+    pre_b = pre_b if pre_b is not None else {}
+
+    lists_a, source = prefix_lists_from(post_a, post_b)
+    lists_b, _ = prefix_lists_from(post_b, post_a)
+    pre_lists_a, _ = prefix_lists_from(pre_a, pre_b)
+    pre_lists_b, _ = prefix_lists_from(pre_b, pre_a)
+
+    for name in sorted(set(lists_a) | set(lists_b)):
+        entries_a = lists_a.get(name)
+        entries_b = lists_b.get(name)
+
+        if entries_a is None or entries_b is None:
+            if name in pre_lists_a and name in pre_lists_b:
+                missing_on = a if entries_a is None else b
+                findings.append(pair_finding(
+                    "Routing", "Pair Prefix-List Missing On One Device", pair, [name],
+                    [("Entries", str(len(entries_a)) if entries_a else "Not Present",
+                      str(len(entries_b)) if entries_b else "Not Present")],
+                    f"Both members had prefix-list {name} in the precheck; {missing_on} no longer has it.",
+                    source,
+                ))
+            continue
+
+        differing = sorted(seq for seq in set(entries_a) | set(entries_b) if entries_a.get(seq) != entries_b.get(seq))
+
+        if differing:
+            fields = [
+                (f"seq {seq}", entries_a.get(seq, "Not Present"), entries_b.get(seq, "Not Present"))
+                for seq in differing
+            ]
+            findings.append(pair_finding(
+                "Routing", "Pair Prefix-List Divergence", pair, [name], fields,
+                f"Prefix-list {name} differs between the two members at {len(differing)} sequence(s). "
+                "A redundant pair is expected to carry the same policy; a one-sided edit (or an "
+                "overwritten sequence on one side) advertises or accepts different routes depending on "
+                "which member a peer talks to.",
+                source,
+            ))
+
+    maps_a, map_source = route_maps_from(post_a, post_b)
+    maps_b, _ = route_maps_from(post_b, post_a)
+    pre_maps_a, _ = route_maps_from(pre_a, pre_b)
+    pre_maps_b, _ = route_maps_from(pre_b, pre_a)
+
+    for name in sorted(set(maps_a) | set(maps_b)):
+        body_a = maps_a.get(name)
+        body_b = maps_b.get(name)
+
+        if body_a is None or body_b is None:
+            if name in pre_maps_a and name in pre_maps_b:
+                missing_on = a if body_a is None else b
+                findings.append(pair_finding(
+                    "Routing", "Pair Route-Map Missing On One Device", pair, [name],
+                    [("Lines", str(len(body_a)) if body_a else "Not Present",
+                      str(len(body_b)) if body_b else "Not Present")],
+                    f"Both members had route-map {name} in the precheck; {missing_on} no longer has it.",
+                    map_source,
+                ))
+            continue
+
+        if body_a == body_b:
+            continue
+
+        detail = []
+
+        for line in difflib.ndiff(body_a, body_b):
+            if line.startswith("- "):
+                detail.append(("removed", f"{a}: {line[2:]}"))
+            elif line.startswith("+ "):
+                detail.append(("added", f"{b}: {line[2:]}"))
+
+        findings.append(pair_finding(
+            "Routing", "Pair Route-Map Divergence", pair, [name],
+            [("Lines", str(len(body_a)), str(len(body_b))),
+             ("Differing lines", str(sum(1 for kind, _ in detail if kind == "removed")),
+              str(sum(1 for kind, _ in detail if kind == "added")))],
+            f"Route-map {name} differs between the two members. Lines only on {a} are shown in red, "
+            f"lines only on {b} in green.",
+            map_source,
+            detail,
+        ))
+
+    ha_command = "show high-availability state"
+
+    if ha_command in post_a and ha_command in post_b:
+        ha_a = parse_ha_state(post_a[ha_command])
+        ha_b = parse_ha_state(post_b[ha_command])
+        differing = sorted(key for key in set(ha_a) | set(ha_b) if ha_a.get(key) != ha_b.get(key))
+
+        if differing:
+            fields = [(key, ha_a.get(key, "Not Present"), ha_b.get(key, "Not Present")) for key in differing]
+            findings.append(pair_finding(
+                "Protocol", "Pair HA State Divergence", pair, ["high-availability"], fields,
+                "HA state values that should match on both members of a healthy pair differ (role-dependent "
+                "values such as State and Priority are ignored). A version, sync or cookie mismatch means "
+                "one member did not receive what the other did.",
+                ha_command,
+            ))
+
+    return findings
+
+
 def raw_diffs(pre_sections, post_sections):
     """Normalized added/removed lines per command."""
     all_commands = sorted(set(pre_sections.keys()) | set(post_sections.keys()))
@@ -889,13 +1182,15 @@ def render_finding(finding):
     """
 
 
-def analyze(precheck_folder, postcheck_folder):
-    """Diff every common device file and roll up findings + totals."""
+def analyze(precheck_folder, postcheck_folder, pairs=None):
+    """Diff every common device file and roll up findings + totals.
+
+    pairs: optional explicit [[host, host], ...] from the inventory; pairs
+    whose hostnames differ only by a trailing number are inferred anyway.
+    """
     pre_files = sorted(os.listdir(precheck_folder))
     post_files = sorted(os.listdir(postcheck_folder))
     common_files = sorted(set(pre_files) & set(post_files))
-
-    device_reports = []
 
     total_findings_by_classification = {
         "Configuration": 0,
@@ -915,14 +1210,12 @@ def analyze(precheck_folder, postcheck_folder):
         "Action Required": 0,
     }
 
-    devices_with_findings = 0
+    # Pass 1: per-device parsing and findings.
+    devices = {}
 
     for file_name in common_files:
-        pre_path = os.path.join(precheck_folder, file_name)
-        post_path = os.path.join(postcheck_folder, file_name)
-
-        pre_sections = parse_sections(pre_path)
-        post_sections = parse_sections(post_path)
+        pre_sections = parse_sections(os.path.join(precheck_folder, file_name))
+        post_sections = parse_sections(os.path.join(postcheck_folder, file_name))
 
         config_changes = bgp_config_changes(pre_sections, post_sections)
         findings = (
@@ -930,7 +1223,38 @@ def analyze(precheck_folder, postcheck_folder):
             + prefix_list_findings(pre_sections, post_sections)
         )
         diffs = raw_diffs(pre_sections, post_sections)
-        raw_categories = classify_raw_diff_commands(diffs)
+
+        devices[file_name.replace(".txt", "")] = {
+            "file_name": file_name,
+            "pre": pre_sections,
+            "post": post_sections,
+            "config_changes": config_changes,
+            "findings": findings,
+            "diffs": diffs,
+            "raw_categories": classify_raw_diff_commands(diffs),
+        }
+
+    # Pass 2: pair symmetry. Each pair finding is attributed to both
+    # members (it raises both devices' attention count and impact score)
+    # but counted once in the network-wide totals.
+    resolved_pairs = resolve_pairs(list(devices), pairs)
+    all_pair_findings = []
+
+    for pair in resolved_pairs:
+        a, b = pair
+        found = pair_findings(pair, devices[a]["post"], devices[b]["post"], devices[a]["pre"], devices[b]["pre"])
+        all_pair_findings.extend(found)
+        devices[a]["findings"].extend(found)
+        devices[b]["findings"].extend(found)
+
+    # Pass 3: counts, scores and totals.
+    device_reports = []
+    devices_with_findings = 0
+
+    for hostname, device in devices.items():
+        findings = device["findings"]
+        config_changes = device["config_changes"]
+        raw_categories = device["raw_categories"]
 
         findings_count = len(findings) + len(config_changes)
 
@@ -938,6 +1262,9 @@ def analyze(precheck_folder, postcheck_folder):
             devices_with_findings += 1
 
         for finding in findings:
+            if "devices" in finding and finding["devices"][0] != hostname:
+                continue  # counted once, on the pair's first member
+
             total_findings_by_classification[finding["classification"]] += 1
             impact_totals[finding["impact"]] += 1
 
@@ -966,11 +1293,11 @@ def analyze(precheck_folder, postcheck_folder):
         )
 
         device_reports.append({
-            "file_name": file_name,
-            "device_id": safe_id(file_name.replace(".txt", "")),
+            "file_name": device["file_name"],
+            "device_id": safe_id(hostname),
             "findings": findings,
             "config_changes": config_changes,
-            "diffs": diffs,
+            "diffs": device["diffs"],
             "raw_categories": raw_categories,
             "findings_count": findings_count,
             "attention_count": device_attention_count,
@@ -994,6 +1321,8 @@ def analyze(precheck_folder, postcheck_folder):
     return {
         "common_files": common_files,
         "device_reports": device_reports,
+        "pairs": resolved_pairs,
+        "pair_findings": all_pair_findings,
         "total_findings_by_classification": total_findings_by_classification,
         "impact_totals": impact_totals,
         "devices_with_findings": devices_with_findings,
@@ -1217,6 +1546,16 @@ a {{
     padding: 18px;
     margin-bottom: 28px;
     border-left: 4px solid var(--yellow);
+}}
+
+.pair-card {{
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 18px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.28);
+    padding: 18px;
+    margin-bottom: 28px;
+    border-left: 4px solid var(--purple);
 }}
 
 .attention-list {{
@@ -1477,7 +1816,17 @@ details .diff-box {{
 }}
 
 @media (max-width: 1200px) {{
-    .cards, .charts, .outcome-grid, .attention-list {{
+    .cards, .charts, .outcome-grid, .pair-card {{
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 18px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.28);
+    padding: 18px;
+    margin-bottom: 28px;
+    border-left: 4px solid var(--purple);
+}}
+
+.attention-list {{
         grid-template-columns: 1fr;
     }}
 
@@ -1552,6 +1901,35 @@ details .diff-box {{
         html_parts.append("</div>")
     else:
         html_parts.append('<p class="empty">No attention-level findings detected.</p>')
+
+    html_parts.append("""
+    </div>
+
+    <div id="pair-symmetry" class="pair-card">
+        <h2>Pair Symmetry</h2>
+""")
+
+    pairs = analysis.get("pairs", [])
+    pair_findings_list = analysis.get("pair_findings", [])
+
+    if not pairs:
+        html_parts.append(
+            '<p class="empty">No redundant pairs to compare: no two captured hostnames differ only by a '
+            'trailing number, and the inventory lists no pairs.</p>'
+        )
+    else:
+        pair_labels = ", ".join(f"{a} / {b}" for a, b in pairs)
+        html_parts.append(
+            f'<p class="muted">{len(pairs)} pair(s) compared from the postcheck captures: '
+            f'{html.escape(pair_labels)}. Same-named prefix-lists and route-maps, and PAN-OS HA state, '
+            f'are checked entry for entry.</p>'
+        )
+
+        if pair_findings_list:
+            for finding in pair_findings_list:
+                html_parts.append(render_finding(finding))
+        else:
+            html_parts.append('<p class="empty">Both members of every pair agree.</p>')
 
     html_parts.append("""
     </div>
@@ -1763,8 +2141,11 @@ new Chart(document.getElementById("deviceImpactChart"), {{
     return "\n".join(html_parts)
 
 
-def build_html_report(ticket, dirs, run_timestamp, console):
-    """Find the latest pre/post runs and write the HTML report."""
+def build_html_report(ticket, dirs, run_timestamp, console, pairs=None):
+    """Find the latest pre/post runs and write the HTML report.
+
+    pairs: optional explicit pair list from the inventory (see analyze).
+    """
     precheck_folder = find_latest_folder(dirs["precheck"], "precheck_")
     postcheck_folder = find_latest_folder(dirs["postcheck"], "postcheck_")
 
@@ -1779,7 +2160,7 @@ def build_html_report(ticket, dirs, run_timestamp, console):
     os.makedirs(dirs["compare"], exist_ok=True)
     html_report = os.path.join(dirs["compare"], f"compare_{run_timestamp}.html")
 
-    analysis = analyze(precheck_folder, postcheck_folder)
+    analysis = analyze(precheck_folder, postcheck_folder, pairs=pairs)
     page = render_html(ticket, precheck_folder, postcheck_folder, analysis)
 
     with open(html_report, "w", encoding="utf-8") as file:
