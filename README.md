@@ -444,6 +444,7 @@ modules/
   inventory.py      loads + validates inventory/devices.yml
   collect.py        parallel SSH capture (netmiko), zip packaging
   textcompare.py    normalization rules + quick .txt diff report
+  difftrim.py       ndiff that skips the lines already matching (see below)
   htmlreport.py     BGP / prefix-list / interface / pair interpretation,
                     impact scoring, HTML dashboard
   notes.py          notes.md: your write-up, rendered into the report
