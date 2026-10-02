@@ -12,3 +12,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+
+# Local tooling worktrees
+.claude/
