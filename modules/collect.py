@@ -24,6 +24,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from modules import redact
+
 # How to ask each platform for its own hostname, so output files are
 # named after the device and not its management IP. Unknown platforms
 # fall back to the IP.
@@ -52,9 +54,13 @@ def get_hostname(conn, device_type, fallback):
     return fallback
 
 
-def collect_device(job, folder_name, progress, overall_task):
+def collect_device(job, folder_name, progress, overall_task, redact_secrets=False):
     device = job["device"]
     commands = job["commands"]
+    # Scrub output before it is written so no password, hash or key ever
+    # reaches disk; off by default because it hides a rotated password
+    # from the diff (see modules/redact.py).
+    clean = redact.scrub if redact_secrets else (lambda text: text)
 
     try:
         progress.console.log(f"Connecting to {device['host']}...")
@@ -70,6 +76,8 @@ def collect_device(job, folder_name, progress, overall_task):
             file.write(f"Hostname: {hostname}\n")
             file.write(f"IP Address: {device['host']}\n")
             file.write(f"Generated: {datetime.now()}\n")
+            if redact_secrets:
+                file.write("Secrets: redacted\n")
             file.write("=" * 80 + "\n")
 
             for command in commands:
@@ -82,7 +90,7 @@ def collect_device(job, folder_name, progress, overall_task):
 
                 file.write(f"\n\n### {command} ###\n")
                 file.write("-" * 80 + "\n")
-                file.write(output)
+                file.write(clean(output))
                 file.write("\n")
 
                 progress.advance(overall_task, 1)
@@ -97,7 +105,7 @@ def collect_device(job, folder_name, progress, overall_task):
 
         with open(failed_file, "w", encoding="utf-8") as file:
             file.write(f"FAILED TO CONNECT TO {device['host']}\n")
-            file.write(str(error))
+            file.write(clean(str(error)))
 
         # Still advance the bar for the commands this device would have run.
         progress.advance(overall_task, len(commands))
@@ -110,8 +118,12 @@ def create_zip(folder_name, zip_name):
             zip_file.write(file_path, arcname=file_name)
 
 
-def run_collection(jobs, phase, phase_dir, run_timestamp, console):
+def run_collection(jobs, phase, phase_dir, run_timestamp, console, redact_secrets=False):
     """Collect all devices for one phase ('precheck' or 'postcheck').
+
+    With redact_secrets, every command's output is passed through
+    modules.redact.scrub() before it is written, so passwords, hashes
+    and keys never land in the capture files or the zip.
 
     Returns (folder_name, zip_name) of the run that was just written.
     """
@@ -138,7 +150,9 @@ def run_collection(jobs, phase, phase_dir, run_timestamp, console):
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = [
-                executor.submit(collect_device, job, folder_name, progress, overall_task)
+                executor.submit(
+                    collect_device, job, folder_name, progress, overall_task, redact_secrets
+                )
                 for job in jobs
             ]
 

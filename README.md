@@ -97,6 +97,28 @@ python3 scripts/precheck.py
 machine. Run `scripts/postcheck.py` after the change and
 `scripts/compare.py` for the HTML report.
 
+### Keeping passwords out of the evidence
+
+A running-config capture carries every `secret sha512 $6$...`, BGP
+`password 7`, TACACS key, SNMP community and PAN-OS `phash` / `-AQ==`
+value on the device. If the zip is going to be attached to a ticket,
+pass `--redact-secrets` to both captures:
+
+```bash
+python3 scripts/precheck.py --redact-secrets
+python3 scripts/postcheck.py --redact-secrets
+```
+
+Each secret value is replaced with `<REDACTED>` before the capture is
+written, so neither the text files, the zip nor the reports ever hold
+it. The keyword and type marker stay (`username admin secret sha512
+<REDACTED>`), so a credential that was added or removed during the
+window still shows up as a change; only a password that was *rotated*
+to a different value is invisible, which is the trade-off the flag
+makes. The rules live in `modules/redact.py`, one commented line per
+pattern, with two catch-alls (crypt-style `$6$` hashes and PAN-OS
+`-AQ==` blobs) that fire whatever keyword precedes them.
+
 ### Windows (PowerShell)
 
 The lines above are for Linux/macOS. Windows PowerShell has no `source`
@@ -275,6 +297,7 @@ modules/
   htmlreport.py     BGP interpretation, impact scoring, HTML dashboard
   layout.py         reports/<TICKET>/ directory conventions
   cli.py            shared argument handling
+  redact.py         --redact-secrets: strips passwords/hashes/keys from captures
 inventory/          devices.example.yml (copy to devices.yml, gitignored)
 reports/            generated evidence, gitignored
 tests/              pytest suite (no device access needed)
@@ -287,7 +310,7 @@ docs/               ARCHITECTURE.md (design decisions), sample report + screensh
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 22 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 46 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```

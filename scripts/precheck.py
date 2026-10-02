@@ -8,6 +8,7 @@ under reports/<TICKET>/Precheck/.
 Usage:
     python3 scripts/precheck.py                 # fully interactive
     python3 scripts/precheck.py --ticket NET-123 --username admin
+    python3 scripts/precheck.py --redact-secrets   # no passwords/hashes in the capture
 """
 
 import os
@@ -35,7 +36,8 @@ def main():
     os.makedirs(dirs["precheck"], exist_ok=True)
 
     _folder_name, zip_name = collect.run_collection(
-        jobs, "precheck", dirs["precheck"], run_timestamp, console
+        jobs, "precheck", dirs["precheck"], run_timestamp, console,
+        redact_secrets=args.redact_secrets,
     )
 
     console.print()

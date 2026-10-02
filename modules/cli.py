@@ -26,6 +26,15 @@ def parse_args(description, needs_inventory=True):
             "--username",
             help="SSH username (prompted if omitted)",
         )
+        parser.add_argument(
+            "--redact-secrets",
+            action="store_true",
+            help=(
+                "Replace passwords, password hashes, SNMP communities, "
+                "TACACS/RADIUS/BGP/OSPF keys and PAN-OS encrypted values "
+                "with <REDACTED> before the capture is written to disk"
+            ),
+        )
 
     args = parser.parse_args()
 

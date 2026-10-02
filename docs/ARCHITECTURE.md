@@ -14,7 +14,8 @@ inventory/devices.yml
         |
         v
   modules/collect.py       parallel SSH capture (netmiko), one text file
-        |                  per device, zipped per run
+        |                  per device, zipped per run; --redact-secrets
+        |                  passes output through modules/redact.py first
         v
   reports/<TICKET>/...     modules/layout.py owns the directory scheme
         |
@@ -65,6 +66,18 @@ whole-file.
   portable tool meant to run against arbitrary environments, so it
   deliberately keeps no secrets store, no credential files, and
   nothing to leak - stricter than a gitignored credentials file.
+
+- **Secrets in captures are the user's call, off by default.** A
+  running-config capture is evidence precisely because it is verbatim,
+  and it carries every password hash, BGP/OSPF key, SNMP community and
+  PAN-OS encrypted value on the device. `--redact-secrets` replaces
+  those values with `<REDACTED>` in `modules/collect.py` before the
+  file is written, so nothing downstream (zip, text diff, HTML report)
+  ever sees them. Redaction keeps the keyword and type marker and drops
+  only the value: an added or removed credential still diffs; a rotated
+  one does not. Rules in `modules/redact.py` are per-pattern and
+  commented like the normalization rules, with two keyword-free
+  catch-alls (crypt-style hashes, PAN-OS `-AQ==` blobs) as a backstop.
 
 - **Evidence is keyed by ticket.** `modules/layout.py` anchors all
   output to `reports/<TICKET>/` at the repo root (not the current
