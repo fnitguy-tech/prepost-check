@@ -11,7 +11,7 @@ Usage:
     python3 scripts/compare.py                  # prompts for ticket
     python3 scripts/compare.py --ticket NET-123
     python3 scripts/compare.py --ticket NET-123 --inventory inventory/net-123-prepost.yml
-    python3 scripts/compare.py --ticket NET-123 --expectations reports/NET-123/expectations.yml
+    python3 scripts/compare.py --ticket NET-123 --notes reports/NET-123/notes.md
 
 The inventory is optional here and is read only for its "pairs:" list;
 pairs whose hostnames differ only by a trailing number (SW-1 / SW-2)
@@ -19,6 +19,10 @@ are inferred from the captures without it. The expectations file
 (default reports/<TICKET>/expectations.yml when it exists) states the
 BGP prefix deltas the change was meant to cause, so the report can say
 "as planned" or "unexplained" instead of hedging on every delta.
+
+The notes file (default reports/<TICKET>/notes.md) is your own account
+of the window. Whatever you write there is rendered above the machine
+findings, so the ticket carries both.
 """
 
 import os
@@ -28,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 
-from modules import expectations, htmlreport, inventory, layout
+from modules import expectations, htmlreport, inventory, layout, notes
 from modules.cli import parse_args
 
 
@@ -47,9 +51,27 @@ def main():
         expected = expectations.load_expectations(expectations_path, args.ticket)
         console.print(f"Expectations: {layout.display_path(expectations_path)} ({len(expected)} entries)")
 
+    notes_path = args.notes or dirs["notes"]
+    notes_text = notes.load(notes_path)
+
+    if notes_text is None:
+        console.print(
+            f"No maintenance notes at {layout.display_path(notes_path)}. "
+            "Run scripts/notes.py to start one."
+        )
+    elif notes.render_html(notes_text):
+        open_items = notes.open_task_count(notes_text)
+        suffix = f", {open_items} item(s) still open" if open_items else ""
+        console.print(f"Notes: {layout.display_path(notes_path)}{suffix}")
+    else:
+        # A template nobody filled in must not read as a finished
+        # write-up, so say so rather than rendering empty headings.
+        console.print(f"Notes: {layout.display_path(notes_path)} is still a blank template; leaving it out.")
+
     htmlreport.build_html_report(
         args.ticket, dirs, run_timestamp, console,
         pairs=pairs, expectations=expected, expectations_label=layout.display_path(expectations_path),
+        notes_text=notes_text,
     )
 
 

@@ -30,6 +30,14 @@ def parse_args(description, needs_inventory=True):
             ),
         )
         parser.add_argument(
+            "--notes",
+            help=(
+                "Markdown file of your notes on the window "
+                "(default: reports/<TICKET>/notes.md if present). Whatever you write there is "
+                "rendered above the findings. scripts/notes.py starts one for you."
+            ),
+        )
+        parser.add_argument(
             "--expectations",
             help=(
                 "YAML file of the BGP prefix deltas you expect, per device and peer "

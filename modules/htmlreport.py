@@ -39,6 +39,7 @@ import re
 from datetime import datetime
 
 from modules import expectations as expectations_module
+from modules import notes
 from modules.layout import display_path, find_latest_folder
 from modules.textcompare import (
     VPN_FLOW_COMMANDS,
@@ -1912,7 +1913,7 @@ def analyze(precheck_folder, postcheck_folder, pairs=None, expectations=None):
     }
 
 
-def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectations_label=None):
+def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectations_label=None, notes_text=None):
     """Render the analysis into a single self-contained HTML page."""
     common_files = analysis["common_files"]
     device_reports = analysis["device_reports"]
@@ -2093,7 +2094,7 @@ a {{
     margin-bottom: 28px;
 }}
 
-.card, .chart-card, .device, .outcome-card, .attention-card {{
+.card, .chart-card, .device, .outcome-card, .attention-card, .notes-card {{
     border: 1px solid var(--line);
     background: var(--panel);
     border-radius: 18px;
@@ -2157,6 +2158,46 @@ a {{
     margin-bottom: 28px;
     border-left: 4px solid var(--yellow);
 }}
+
+.notes-card {{
+    padding: 22px;
+    margin-bottom: 28px;
+    border-left: 4px solid var(--blue);
+}}
+
+.notes-card h3 {{
+    margin: 18px 0 8px;
+    font-size: 15px;
+    color: var(--blue);
+}}
+
+.notes-card h3:first-of-type {{ margin-top: 6px; }}
+
+.notes-card p {{
+    margin: 0 0 10px;
+    line-height: 1.6;
+    color: #dbeafe;
+}}
+
+.notes-list {{
+    margin: 0 0 10px;
+    padding-left: 20px;
+    line-height: 1.6;
+    color: #dbeafe;
+}}
+
+.notes-list .notes-task {{
+    list-style: none;
+    margin-left: -20px;
+}}
+
+.notes-box {{
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    color: var(--yellow);
+}}
+
+.notes-done .notes-box {{ color: var(--green); }}
+.notes-done {{ color: var(--muted); }}
 
 .pair-card {{
     border: 1px solid var(--line);
@@ -2502,6 +2543,14 @@ details .diff-box {{
     </div>
 """)
 
+    # The engineer's account comes before the machine's, because a
+    # reader opening this on a ticket wants to know what a person
+    # concluded before they read what a parser noticed.
+    notes_html = notes.render_html(notes_text) if notes_text else ""
+
+    if notes_html:
+        html_parts.append("\n    " + notes_html + "\n")
+
     html_parts.append("""
     <div id="attention-items" class="attention-card">
         <h2>Items Needing Attention</h2>
@@ -2764,12 +2813,17 @@ new Chart(document.getElementById("deviceImpactChart"), {{
     return "\n".join(html_parts)
 
 
-def build_html_report(ticket, dirs, run_timestamp, console, pairs=None, expectations=None, expectations_label=None):
+def build_html_report(
+    ticket, dirs, run_timestamp, console,
+    pairs=None, expectations=None, expectations_label=None, notes_text=None,
+):
     """Find the latest pre/post runs and write the HTML report.
 
     pairs: optional explicit pair list from the inventory (see analyze).
     expectations: entries from the expectations file, or None; the label
     is the path shown in the report header.
+    notes_text: the notes.md contents, or None; rendered above the
+    findings (see modules/notes.py).
     """
     precheck_folder = find_latest_folder(dirs["precheck"], "precheck_")
     postcheck_folder = find_latest_folder(dirs["postcheck"], "postcheck_")
@@ -2786,7 +2840,10 @@ def build_html_report(ticket, dirs, run_timestamp, console, pairs=None, expectat
     html_report = os.path.join(dirs["compare"], f"compare_{run_timestamp}.html")
 
     analysis = analyze(precheck_folder, postcheck_folder, pairs=pairs, expectations=expectations)
-    page = render_html(ticket, precheck_folder, postcheck_folder, analysis, expectations_label=expectations_label)
+    page = render_html(
+        ticket, precheck_folder, postcheck_folder, analysis,
+        expectations_label=expectations_label, notes_text=notes_text,
+    )
 
     with open(html_report, "w", encoding="utf-8") as file:
         file.write(page)
