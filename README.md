@@ -32,6 +32,11 @@ SITE-B-SW-2    Attention 1 · Action Required 0 · Impact 28
 SITE-A-SW-1    Attention 1 · Action Required 0 · Impact 31
   BGP Prefix Count Changed  198.18.85.240  AS4200000001
     Prefixes Received       248 → 53
+
+SITE-C-SW-2    Attention 1 · Action Required 0 · Impact 5
+  Prefix-List Entry Withdrawn  ISP-OUT  seq 40
+    Entry                   permit 198.51.100.243/32 → Not Present
+    Evidence: show ip prefix-list
 ```
 
 Every finding links to the raw before/after diff behind it. All hostnames,
@@ -197,7 +202,12 @@ answer systematic:
   per-peer state and correlated with config changes: a peer going
   `Estab → Idle(Admin)` right after a `neighbor x.x.x.x shutdown` line
   appeared in the config is reported as one finding with its evidence,
-  rated `Attention`.
+  rated `Attention`. Prefix-lists are parsed entry by entry, so a
+  `seq 40 permit ...` line that vanished is reported as a withdrawn
+  advertisement (`Attention`), and an existing sequence number whose
+  entry changed in place (the EOS replace-by-sequence overwrite) is
+  called out as such, instead of hiding among hundreds of grey lines in
+  the raw config diff.
 
 All device interaction is read-only `show` commands over SSH. The one
 exception, PAN-OS `set cli config-output-format set`, only changes how
@@ -224,6 +234,16 @@ The HTML report is a single self-contained file: overall health verdict
 (`Stable / Changed / Attention / Action Required`), per-device impact
 scores, findings with before/after state, category and impact charts,
 and every raw diff behind a collapsible section for evidence.
+
+Interpreted findings cover:
+
+- **BGP peers** (`show ip bgp summary`): removed, added, state change,
+  administrative shutdown, prefix-count change.
+- **Prefix-lists** (`show ip prefix-list`, or the running config when
+  that command is not captured): entry withdrawn (`Attention`), entry
+  overwritten at the same sequence number (`Attention`), entry
+  resequenced (`Changed`), entry or list added (`Stable`), list removed
+  (`Attention`).
 
 ![Interpreted BGP findings with impact ratings and before/after state](docs/img/report-findings.png)
 
@@ -322,7 +342,7 @@ Linux / macOS (on Windows, use `py -m pytest tests/` for the second line):
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 46 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 56 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
@@ -331,9 +351,9 @@ CI (`.github/workflows/ci.yml`) runs the same three commands on Python 3.12
 and the test suite alone on 3.10, the documented floor.
 
 The test suite covers the normalization rules, BGP summary parsing,
-finding classification, and both report generators end-to-end against
-synthetic device captures, so parser changes can be validated without
-touching a live network.
+prefix-list parsing and rating, finding classification, and both report
+generators end-to-end against synthetic device captures, so parser
+changes can be validated without touching a live network.
 
 ## License
 

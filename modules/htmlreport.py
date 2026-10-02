@@ -2,14 +2,29 @@
 
 Where the text compare answers "what changed", this report answers "does
 it matter": it parses BGP summaries into per-peer state, correlates
-peer changes with config diffs, classifies every changed command into a
-category (Configuration / Protocol / Routing / Interface / ...), scores
-each device's operational impact, and renders a self-contained dark
-dashboard (Chart.js from CDN is its only external asset) that can be
-attached to a change ticket as-is.
+peer changes with config diffs, parses prefix-lists entry by entry,
+classifies every changed command into a category (Configuration /
+Protocol / Routing / Interface / ...), scores each device's operational
+impact, and renders a self-contained dark dashboard (Chart.js from CDN
+is its only external asset) that can be attached to a change ticket
+as-is.
 
 Impact levels, most to least severe:
     Action Required > Attention > Changed > Stable
+
+Every interpreted finding, whatever parsed it, is one dict with the same
+keys so it rolls into the health verdict, the attention list, the
+per-device impact score and the charts through one path:
+
+    classification  chart category (Protocol / Routing / Interface ...)
+    category        short group label ("BGP state", "Prefix-list")
+    impact          Stable / Changed / Attention / Action Required
+    title           one-line headline
+    subject         identity spans shown after the title (peer, list name)
+    fields          [(label, before, after)] rendered as the state grid
+    summary         plain-English interpretation
+    evidence        which capture sections back it up
+    detail          optional [(kind, text)] raw lines shown under it
 
 Normalization here is looser than modules/textcompare.py on purpose:
 this report keeps more context lines so the collapsible raw-diff
@@ -260,6 +275,39 @@ def bgp_config_changes(pre_sections, post_sections):
     return important
 
 
+def bgp_finding(classification, category, impact, title, peer, before, after, summary, evidence):
+    """One BGP peer finding in the shared finding shape.
+
+    The peer dicts are kept (before / after / peer) because tests and the
+    summary text read them; subject and fields are what the renderer uses,
+    so a BGP finding and a prefix-list finding draw the same way.
+    """
+    state_before = before["state"] if before else "Not Present"
+    state_after = after["state"] if after else "Not Present"
+    rx_before = before["prefixes_received"] if before else "0"
+    rx_after = after["prefixes_received"] if after else "0"
+    acc_before = before["prefixes_accepted"] if before else "0"
+    acc_after = after["prefixes_accepted"] if after else "0"
+
+    return {
+        "classification": classification,
+        "category": category,
+        "impact": impact,
+        "title": title,
+        "peer": peer,
+        "before": before,
+        "after": after,
+        "subject": [peer["name"], peer["ip"], f"AS{peer['as']}"],
+        "fields": [
+            ("State", state_before, state_after),
+            ("Prefixes Received", rx_before, rx_after),
+            ("Prefixes Accepted", acc_before, acc_after),
+        ],
+        "summary": summary,
+        "evidence": evidence,
+    }
+
+
 def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
     """Interpret per-peer BGP changes into impact-rated findings."""
     pre_bgp = parse_bgp_summary(pre_sections.get("show ip bgp summary", []))
@@ -271,32 +319,22 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
     for peer in sorted(set(pre_bgp) - set(post_bgp)):
         before = pre_bgp[peer]
 
-        findings.append({
-            "classification": "Protocol",
-            "category": "BGP state",
-            "impact": "Attention",
-            "title": "BGP Peer Removed From Summary",
-            "peer": before,
-            "before": before,
-            "after": None,
-            "summary": "This peer appeared in the precheck but was not present in the postcheck BGP summary.",
-            "evidence": "show ip bgp summary",
-        })
+        findings.append(bgp_finding(
+            "Protocol", "BGP state", "Attention", "BGP Peer Removed From Summary",
+            before, before, None,
+            "This peer appeared in the precheck but was not present in the postcheck BGP summary.",
+            "show ip bgp summary",
+        ))
 
     for peer in sorted(set(post_bgp) - set(pre_bgp)):
         after = post_bgp[peer]
 
-        findings.append({
-            "classification": "Protocol",
-            "category": "BGP state",
-            "impact": "Stable",
-            "title": "BGP Peer Added",
-            "peer": after,
-            "before": None,
-            "after": after,
-            "summary": "This peer was not present in the precheck but appeared in the postcheck BGP summary.",
-            "evidence": "show ip bgp summary",
-        })
+        findings.append(bgp_finding(
+            "Protocol", "BGP state", "Stable", "BGP Peer Added",
+            after, None, after,
+            "This peer was not present in the precheck but appeared in the postcheck BGP summary.",
+            "show ip bgp summary",
+        ))
 
     for peer in sorted(set(pre_bgp) & set(post_bgp)):
         before = pre_bgp[peer]
@@ -323,17 +361,9 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
                 impact = "Attention"
                 summary = "The peer state changed between precheck and postcheck."
 
-            findings.append({
-                "classification": "Protocol",
-                "category": "BGP state",
-                "impact": impact,
-                "title": title,
-                "peer": after,
-                "before": before,
-                "after": after,
-                "summary": summary,
-                "evidence": detected_evidence,
-            })
+            findings.append(bgp_finding(
+                "Protocol", "BGP state", impact, title, after, before, after, summary, detected_evidence,
+            ))
 
         elif (
             before["prefixes_received"] != after["prefixes_received"]
@@ -343,17 +373,204 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes):
             after_received = int(after["prefixes_received"]) if after["prefixes_received"].isdigit() else 0
             delta = after_received - before_received
 
-            findings.append({
-                "classification": "Routing",
-                "category": "BGP prefixes",
-                "impact": "Changed",
-                "title": "BGP Prefix Count Changed",
-                "peer": after,
-                "before": before,
-                "after": after,
-                "summary": f"Prefix count changed by {delta}. This may be expected when routing policy, communities, failover, or advertised routes change.",
-                "evidence": detected_evidence,
-            })
+            findings.append(bgp_finding(
+                "Routing", "BGP prefixes", "Changed", "BGP Prefix Count Changed", after, before, after,
+                f"Prefix count changed by {delta}. This may be expected when routing policy, communities, "
+                "failover, or advertised routes change.",
+                detected_evidence,
+            ))
+
+    return findings
+
+
+# "ip prefix-list NAME" opens a list in both the EOS show output and the
+# running config; the one-line config form carries the entry on the same
+# line ("ip prefix-list NAME seq 10 permit 10.0.0.0/8"). A Cisco-style
+# header ("ip prefix-list NAME: 3 entries") leaves a colon on the name.
+PREFIX_LIST_HEADER = re.compile(r"^\s*(?:ip|ipv6)\s+prefix-list\s+(\S+)(.*)$", re.IGNORECASE)
+PREFIX_LIST_ENTRY = re.compile(r"^\s*seq\s+(\d+)\s+(.+?)\s*$", re.IGNORECASE)
+# Per-entry hit counters tick on their own; the entry is the point.
+PREFIX_LIST_HITS = re.compile(r"\s*\(\s*\d+\s+(?:matches|hits)\s*\)\s*$", re.IGNORECASE)
+
+
+def parse_prefix_lists(lines):
+    """Parse prefix-list listings into {list_name: {seq: rule}}.
+
+    rule is the entry text after the sequence number with hit counters and
+    extra whitespace removed, e.g. "permit 198.51.100.0/24 le 32", so two
+    captures of an untouched list compare equal.
+    """
+    lists = {}
+    current = None
+
+    for line in lines:
+        header = PREFIX_LIST_HEADER.match(line)
+
+        if header:
+            current = header.group(1).rstrip(":")
+            lists.setdefault(current, {})
+            rest = header.group(2)
+        elif current is not None:
+            rest = line
+        else:
+            continue
+
+        entry = PREFIX_LIST_ENTRY.match(rest)
+
+        if entry:
+            rule = " ".join(PREFIX_LIST_HITS.sub("", entry.group(2)).split())
+            lists[current][int(entry.group(1))] = rule
+        elif current is not None and header is None and rest.strip() and not rest.startswith((" ", "\t")):
+            # A non-indented line that is not a header ends the block
+            # (config "!" separators, the next command's output).
+            current = None
+
+    return lists
+
+
+def prefix_lists_from(sections, other_sections=None):
+    """Prefix-lists for one capture, plus which command they came from.
+
+    "show ip prefix-list" is preferred because it shows the list as the
+    device holds it; inventories that do not capture it still carry the
+    same entries in the running config. Both captures of a pair must use
+    the same source so a list is never compared against itself.
+    """
+    other_sections = other_sections if other_sections is not None else sections
+
+    if "show ip prefix-list" in sections and "show ip prefix-list" in other_sections:
+        return parse_prefix_lists(sections["show ip prefix-list"]), "show ip prefix-list"
+
+    config_lines = sections.get("show running-config", [])
+    return parse_prefix_lists(config_lines), "show running-config"
+
+
+def prefix_list_finding(impact, title, name, seq_label, fields, summary, evidence):
+    """One prefix-list finding in the shared finding shape."""
+    return {
+        "classification": "Routing",
+        "category": "Prefix-list",
+        "impact": impact,
+        "title": title,
+        "subject": [name] + ([seq_label] if seq_label else []),
+        "fields": fields,
+        "summary": summary,
+        "evidence": evidence,
+    }
+
+
+def entry_fields(seq_before, seq_after, rule_before, rule_after):
+    """Sequence + entry columns for a single-entry prefix-list finding."""
+    return [
+        ("Sequence", str(seq_before) if seq_before is not None else "Not Present",
+         str(seq_after) if seq_after is not None else "Not Present"),
+        ("Entry", rule_before or "Not Present", rule_after or "Not Present"),
+    ]
+
+
+def prefix_list_findings(pre_sections, post_sections):
+    """Interpret prefix-list changes entry by entry into impact-rated findings.
+
+    A permit that disappears is a withdrawn advertisement (or a route no
+    longer accepted, if the list is applied inbound), so it is rated
+    Attention, as is a sequence whose entry changed in place: on EOS,
+    configuring an existing sequence number silently replaces that entry,
+    which is the easiest way to drop a prefix without meaning to. An
+    entry that merely moved to a new sequence is Changed; a new sequence
+    is Stable. A whole list appearing or vanishing is reported once.
+    """
+    pre_lists, evidence = prefix_lists_from(pre_sections, post_sections)
+    post_lists, _ = prefix_lists_from(post_sections, pre_sections)
+
+    findings = []
+
+    for name in sorted(set(pre_lists) | set(post_lists)):
+        before = pre_lists.get(name)
+        after = post_lists.get(name)
+
+        if after is None:
+            finding = prefix_list_finding(
+                "Attention", "Prefix-List Removed", name, None,
+                [("Entries", str(len(before)), "Not Present")],
+                f"The whole list ({len(before)} entries) is gone from the postcheck. Every route it permitted "
+                "is no longer matched; a route-map or neighbor that still references it matches nothing.",
+                evidence,
+            )
+            finding["detail"] = [("removed", f"seq {seq} {rule}") for seq, rule in sorted(before.items())]
+            findings.append(finding)
+            continue
+
+        if before is None:
+            finding = prefix_list_finding(
+                "Stable", "Prefix-List Added", name, None,
+                [("Entries", "Not Present", str(len(after)))],
+                f"A new list with {len(after)} entries appeared in the postcheck. It changes nothing until a "
+                "route-map or neighbor references it.",
+                evidence,
+            )
+            finding["detail"] = [("added", f"seq {seq} {rule}") for seq, rule in sorted(after.items())]
+            findings.append(finding)
+            continue
+
+        before_rules = set(before.values())
+        after_rules = set(after.values())
+
+        for seq in sorted(set(before) | set(after)):
+            rule_before = before.get(seq)
+            rule_after = after.get(seq)
+
+            if rule_before is not None and rule_after is not None:
+                if rule_before == rule_after:
+                    continue
+
+                if rule_before in after_rules:
+                    moved_to = next(s for s, r in sorted(after.items()) if r == rule_before)
+                    fate = f"The previous entry still appears at seq {moved_to}."
+                else:
+                    fate = "The previous entry no longer appears anywhere in the list."
+
+                findings.append(prefix_list_finding(
+                    "Attention", "Prefix-List Sequence Overwritten", name, f"seq {seq}",
+                    entry_fields(seq, seq, rule_before, rule_after),
+                    f"seq {seq} now holds '{rule_after}' instead of '{rule_before}'. Configuring an existing "
+                    f"sequence number replaces that entry in place rather than adding one. {fate}",
+                    evidence,
+                ))
+
+            elif rule_after is None:
+                if rule_before in after_rules:
+                    moved_to = next(s for s, r in sorted(after.items()) if r == rule_before)
+                    findings.append(prefix_list_finding(
+                        "Changed", "Prefix-List Entry Resequenced", name, f"seq {seq}",
+                        entry_fields(seq, moved_to, rule_before, rule_before),
+                        f"The same entry moved from seq {seq} to seq {moved_to}; what the list matches is unchanged "
+                        "unless the order relative to a deny changed.",
+                        evidence,
+                    ))
+                else:
+                    action = rule_before.split()[0].lower() if rule_before else "permit"
+                    effect = (
+                        "If the list is applied outbound this route is no longer advertised; inbound, it is "
+                        "no longer accepted."
+                        if action == "permit"
+                        else "Routes this deny stopped are no longer stopped by it."
+                    )
+                    findings.append(prefix_list_finding(
+                        "Attention", "Prefix-List Entry Withdrawn", name, f"seq {seq}",
+                        entry_fields(seq, None, rule_before, None),
+                        f"'{rule_before}' at seq {seq} is gone and is not re-added at another sequence. {effect}",
+                        evidence,
+                    ))
+
+            elif rule_after not in before_rules:
+                # An entry that was already in the list at another seq is
+                # reported once, as the resequence or overwrite above.
+                findings.append(prefix_list_finding(
+                    "Stable", "Prefix-List Entry Added", name, f"seq {seq}",
+                    entry_fields(None, seq, None, rule_after),
+                    f"'{rule_after}' was added at seq {seq}; existing entries are untouched.",
+                    evidence,
+                ))
 
     return findings
 
@@ -413,9 +630,14 @@ def classify_raw_diff_commands(diffs):
             "show global-protect-portal satellite-cookie-expiration",
         ]:
             categories["Protocol"] += 1
-        elif command in ["show route-map", "show ip prefix-list"]:
-            categories["Routing"] += 1
-        elif command in ["show ip route", "show ip route ospf", "show ip bgp", "show routing route"]:
+        elif command in [
+            "show route-map",
+            "show ip prefix-list",
+            "show ip route",
+            "show ip route ospf",
+            "show ip bgp",
+            "show routing route",
+        ]:
             categories["Routing"] += 1
         elif command in ["show interfaces status", "show interfaces trunk", "show port-channel summary", "show interfaces counters errors", "show interfaces description"]:
             categories["Interface"] += 1
@@ -437,12 +659,12 @@ def render_diff_line(kind, text):
     return f'<div class="{css}">{sign} {html.escape(text)}</div>'
 
 
-def render_bgp_finding(finding):
+def render_finding(finding):
+    """Render one finding of any kind: badge, title, subject spans, the
+    before/after grid built from its fields, summary, evidence and any
+    raw detail lines."""
     impact = finding["impact"]
-    title = finding["title"]
-    before = finding["before"]
-    after = finding["after"]
-    peer = finding["peer"]
+    arrow = finding.get("arrow", "→")
 
     badge_class = {
         "Stable": "badge-stable",
@@ -451,42 +673,42 @@ def render_bgp_finding(finding):
         "Action Required": "badge-action",
     }.get(impact, "badge-changed")
 
-    state_before = before["state"] if before else "Not Present"
-    state_after = after["state"] if after else "Not Present"
+    subject_html = ""
 
-    rx_before = before["prefixes_received"] if before else "0"
-    rx_after = after["prefixes_received"] if after else "0"
+    for index, span in enumerate(finding.get("subject", [])):
+        css = "peer-name" if index == 0 else "peer-ip"
+        subject_html += f'<span class="{css}">{html.escape(str(span))}</span>\n            '
 
-    acc_before = before["prefixes_accepted"] if before else "0"
-    acc_after = after["prefixes_accepted"] if after else "0"
+    fields_html = ""
+
+    for label, before, after in finding.get("fields", []):
+        fields_html += f"""
+            <div>
+                <div class="mini-label">{html.escape(label)}</div>
+                <div class="state-flow"><span>{html.escape(str(before))}</span><span class="arrow">{html.escape(arrow)}</span><span>{html.escape(str(after))}</span></div>
+            </div>"""
+
+    detail_html = ""
+
+    if finding.get("detail"):
+        detail_html = '<div class="diff-box finding-detail">' + "".join(
+            render_diff_line(kind, text) for kind, text in finding["detail"]
+        ) + "</div>"
 
     return f"""
     <div class="finding {impact.lower().replace(" ", "-")}">
         <div class="finding-title">
             <span class="badge {badge_class}">{html.escape(impact)}</span>
-            <span class="finding-heading">{html.escape(title)}</span>
-            <span class="peer-name">{html.escape(peer["name"])}</span>
-            <span class="peer-ip">{html.escape(peer["ip"])}</span>
-            <span class="peer-as">AS{html.escape(peer["as"])}</span>
+            <span class="finding-heading">{html.escape(finding["title"])}</span>
+            {subject_html}
         </div>
 
-        <div class="finding-grid">
-            <div>
-                <div class="mini-label">State</div>
-                <div class="state-flow"><span>{html.escape(state_before)}</span><span class="arrow">→</span><span>{html.escape(state_after)}</span></div>
-            </div>
-            <div>
-                <div class="mini-label">Prefixes Received</div>
-                <div class="state-flow"><span>{html.escape(rx_before)}</span><span class="arrow">→</span><span>{html.escape(rx_after)}</span></div>
-            </div>
-            <div>
-                <div class="mini-label">Prefixes Accepted</div>
-                <div class="state-flow"><span>{html.escape(acc_before)}</span><span class="arrow">→</span><span>{html.escape(acc_after)}</span></div>
-            </div>
+        <div class="finding-grid">{fields_html}
         </div>
 
         <div class="explanation">{html.escape(finding["summary"])}</div>
         <div class="evidence">Evidence: {html.escape(finding["evidence"])}</div>
+        {detail_html}
     </div>
     """
 
@@ -527,16 +749,19 @@ def analyze(precheck_folder, postcheck_folder):
         post_sections = parse_sections(post_path)
 
         config_changes = bgp_config_changes(pre_sections, post_sections)
-        bgp_findings = bgp_neighbor_findings(pre_sections, post_sections, config_changes)
+        findings = (
+            bgp_neighbor_findings(pre_sections, post_sections, config_changes)
+            + prefix_list_findings(pre_sections, post_sections)
+        )
         diffs = raw_diffs(pre_sections, post_sections)
         raw_categories = classify_raw_diff_commands(diffs)
 
-        findings_count = len(bgp_findings) + len(config_changes)
+        findings_count = len(findings) + len(config_changes)
 
         if findings_count > 0:
             devices_with_findings += 1
 
-        for finding in bgp_findings:
+        for finding in findings:
             total_findings_by_classification[finding["classification"]] += 1
             impact_totals[finding["impact"]] += 1
 
@@ -548,10 +773,10 @@ def analyze(precheck_folder, postcheck_folder):
             if count:
                 total_findings_by_classification[category] += count
 
-        device_attention_count = sum(1 for f in bgp_findings if f["impact"] == "Attention")
-        device_action_count = sum(1 for f in bgp_findings if f["impact"] == "Action Required")
-        device_changed_count = sum(1 for f in bgp_findings if f["impact"] == "Changed")
-        device_stable_count = sum(1 for f in bgp_findings if f["impact"] == "Stable")
+        device_attention_count = sum(1 for f in findings if f["impact"] == "Attention")
+        device_action_count = sum(1 for f in findings if f["impact"] == "Action Required")
+        device_changed_count = sum(1 for f in findings if f["impact"] == "Changed")
+        device_stable_count = sum(1 for f in findings if f["impact"] == "Stable")
 
         # Weighted so one action-required finding outranks any pile of
         # cosmetic churn; interface diffs weigh more than L2 noise.
@@ -567,7 +792,7 @@ def analyze(precheck_folder, postcheck_folder):
         device_reports.append({
             "file_name": file_name,
             "device_id": safe_id(file_name.replace(".txt", "")),
-            "bgp_findings": bgp_findings,
+            "findings": findings,
             "config_changes": config_changes,
             "diffs": diffs,
             "raw_categories": raw_categories,
@@ -984,9 +1209,13 @@ a {{
 
 .finding-grid {{
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 12px;
     margin-bottom: 12px;
+}}
+
+.finding-detail {{
+    margin-top: 10px;
 }}
 
 .mini-label {{
@@ -1177,7 +1406,7 @@ details .diff-box {{
 
     for report in device_reports:
         file_name = report["file_name"]
-        bgp_findings = report["bgp_findings"]
+        findings = report["findings"]
         config_changes = report["config_changes"]
         diffs = report["diffs"]
 
@@ -1192,11 +1421,11 @@ details .diff-box {{
             <h3>Protocol / Routing Interpretation</h3>
     """)
 
-        if bgp_findings:
-            for finding in bgp_findings:
-                html_parts.append(render_bgp_finding(finding))
+        if findings:
+            for finding in findings:
+                html_parts.append(render_finding(finding))
         else:
-            html_parts.append('<p class="empty">No meaningful BGP neighbor or prefix changes detected.</p>')
+            html_parts.append('<p class="empty">No meaningful BGP neighbor, prefix or prefix-list changes detected.</p>')
 
         html_parts.append("""
         </div>

@@ -49,6 +49,23 @@ whole-file.
   per-device impact. Its normalization is looser on purpose so the
   collapsible raw-diff evidence sections read naturally.
 
+- **One finding shape, many parsers.** Every interpreted finding is a
+  dict with the same keys (classification, category, impact, title,
+  subject, fields, summary, evidence, optional detail lines). The
+  renderer, the health verdict, the attention list, the per-device
+  impact score and the charts only ever see that shape, so adding a new
+  interpretation (prefix-lists were the first after BGP) means writing
+  a parser and a rating function, never a new rendering path.
+
+- **Prefix-lists are rated per entry, not per line.** `show ip
+  prefix-list` (or the running config, when the command is not in the
+  inventory) is parsed into `{list: {seq: rule}}` with hit counters
+  stripped. An entry that vanished and was not re-added elsewhere is a
+  withdrawn advertisement (Attention); a sequence whose entry changed in
+  place is the EOS replace-by-sequence overwrite (Attention); a moved
+  entry is Changed; a new sequence is Stable. The raw config diff cannot
+  tell those four apart.
+
 - **An unreachable device is a finding, not an abort.** During a
   maintenance window, a device that stopped answering SSH is exactly
   the kind of thing the evidence should show. Collection records it as
