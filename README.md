@@ -43,8 +43,9 @@ A fictional four-device uplink migration ships in `docs/demo/`
 ([scenario](docs/demo/NET-DEMO/SCENARIO.md)). One command runs the whole
 workflow on it: the parallel collector (netmiko is swapped for a stub
 that replays the bundled captures, so no SSH happens), zip packaging,
-the quick text diff, and the HTML report. Linux/macOS (on Windows,
-use the [Windows (PowerShell)](#windows-powershell) steps instead):
+the quick text diff, and the HTML report.
+
+**Linux / macOS**
 
 ```bash
 git clone https://github.com/fnitguy-tech/prepost-check.git
@@ -54,6 +55,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python3 scripts/demo.py
 ```
+
+**Windows (PowerShell)**: follow the
+[Windows (PowerShell)](#windows-powershell) setup below, then run
+`py .\scripts\demo.py`.
 
 ![Terminal: parallel collection in progress, one line per device as it connects](docs/img/progress-bar.png)
 
@@ -79,8 +84,9 @@ reports "No meaningful changes detected."
 
 Python 3.10+ (netmiko 4.7 needs it) and SSH reachability to your devices. Clone, install,
 fill in the inventory, then answer the prompts (ticket number, SSH username, password).
-Linux/macOS (on Windows, use the [Windows (PowerShell)](#windows-powershell)
-steps instead):
+Pick the block for your operating system.
+
+### Linux / macOS
 
 ```bash
 git clone https://github.com/fnitguy-tech/prepost-check.git
@@ -97,33 +103,10 @@ python3 scripts/precheck.py
 machine. Run `scripts/postcheck.py` after the change and
 `scripts/compare.py` for the HTML report.
 
-### Keeping passwords out of the evidence
-
-A running-config capture carries every `secret sha512 $6$...`, BGP
-`password 7`, TACACS key, SNMP community and PAN-OS `phash` / `-AQ==`
-value on the device. If the zip is going to be attached to a ticket,
-pass `--redact-secrets` to both captures:
-
-```bash
-python3 scripts/precheck.py --redact-secrets
-python3 scripts/postcheck.py --redact-secrets
-```
-
-Each secret value is replaced with `<REDACTED>` before the capture is
-written, so neither the text files, the zip nor the reports ever hold
-it. The keyword and type marker stay (`username admin secret sha512
-<REDACTED>`), so a credential that was added or removed during the
-window still shows up as a change; only a password that was *rotated*
-to a different value is invisible, which is the trade-off the flag
-makes. The rules live in `modules/redact.py`, one commented line per
-pattern, with two catch-alls (crypt-style `$6$` hashes and PAN-OS
-`-AQ==` blobs) that fire whatever keyword precedes them.
-
 ### Windows (PowerShell)
 
-The lines above are for Linux/macOS. Windows PowerShell has no `source`
-or `$EDITOR`, and the built-in 5.1 version does not accept `&&` between
-commands. Use the
+Windows PowerShell has no `source` or `$EDITOR`, and the built-in 5.1
+version does not accept `&&` between commands. Use the
 `py` launcher that the python.org installer ships: it always finds the
 real Python, whereas plain `python` often hits the Microsoft Store stub
 Windows installs by default ("Python was not found; run without
@@ -169,6 +152,33 @@ nothing on PATH:
 If `py` is not found either, Python did not finish installing: rerun
 the python.org installer with "Add python.exe to PATH" ticked, then
 reopen the terminal.
+
+### Keeping passwords out of the evidence
+
+A running-config capture carries every `secret sha512 $6$...`, BGP
+`password 7`, TACACS key, SNMP community and PAN-OS `phash` / `-AQ==`
+value on the device. If the zip is going to be attached to a ticket,
+pass `--redact-secrets` to both captures:
+
+```bash
+python3 scripts/precheck.py --redact-secrets     # Linux / macOS
+python3 scripts/postcheck.py --redact-secrets
+```
+
+```powershell
+py .\scripts\precheck.py --redact-secrets        # Windows (PowerShell)
+py .\scripts\postcheck.py --redact-secrets
+```
+
+Each secret value is replaced with `<REDACTED>` before the capture is
+written, so neither the text files, the zip nor the reports ever hold
+it. The keyword and type marker stay (`username admin secret sha512
+<REDACTED>`), so a credential that was added or removed during the
+window still shows up as a change; only a password that was *rotated*
+to a different value is invisible, which is the trade-off the flag
+makes. The rules live in `modules/redact.py`, one commented line per
+pattern, with two catch-alls (crypt-style `$6$` hashes and PAN-OS
+`-AQ==` blobs) that fire whatever keyword precedes them.
 
 ## Why this exists
 
@@ -307,6 +317,8 @@ docs/               ARCHITECTURE.md (design decisions), sample report + screensh
 ```
 
 ## Tests and lint
+
+Linux / macOS (on Windows, use `py -m pytest tests/` for the second line):
 
 ```bash
 pip install -r requirements-dev.txt
