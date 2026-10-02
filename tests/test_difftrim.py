@@ -98,12 +98,15 @@ def test_the_known_divergence_is_recorded_not_hidden():
     a third of the time, at any length. Duplicate density causes that,
     not size, so a length cutoff wouldn't help.
 
-    Real captures don't hit it. All 190 sections of a 10-device pair
-    match difflib exactly, and so does a 78,180-line config with 50 lines
-    changed and with 200 inserted. Real configs have unique lines between
-    the "!" separators, and real changes are localized. Both tools use
-    the same trim, so they still match each other, which is what the
-    reports need.
+    Real captures do hit it, rarely and cosmetically. On the bundled
+    demo a "+ !" line moved two places among the other additions in a
+    config diff - same lines added and removed, different order among
+    siblings. The 190 sections of a 10-device pair all matched difflib,
+    but those configs were identical pre/post, so the trim
+    short-circuited and never reached the ambiguous path.
+
+    Both tools run the same trim and produce the same 48 diff lines in
+    the same order, which is the parity the reports rest on.
     """
     rng = random.Random(7)
     vocabulary = ["!", "   exit", "  seq 10 permit x", "router bgp 1"]
