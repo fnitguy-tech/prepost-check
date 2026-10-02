@@ -126,7 +126,7 @@ def test_delta_that_differs_from_plan_is_attention():
     findings = bgp_neighbor_findings(_sections(812), _sections(814), [], expectations=[_entry("ISP-B", expected_delta=3)])
 
     assert [(f["title"], f["impact"]) for f in findings] == [("BGP Prefix Count Differs From Expectation", "Attention")]
-    assert "changed by +2; the expectation was a change of +3" in findings[0]["summary"]
+    assert "changed by +2, but you planned for a change of +3" in findings[0]["summary"]
 
 
 def test_delta_with_no_entry_is_unexplained_attention():
@@ -155,7 +155,7 @@ def test_state_change_outranks_the_expectation():
 
     findings = bgp_neighbor_findings(_sections(812), idle, [], expectations=[_entry("ISP-B", expected_delta=3)])
 
-    assert [f["title"] for f in findings] == ["BGP Peer Administratively Disabled"]
+    assert [f["title"] for f in findings] == ["BGP Peer Shut Down"]
 
 
 def test_demo_captures_match_the_demo_expectations():

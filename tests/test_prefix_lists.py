@@ -80,13 +80,13 @@ def test_removed_entry_is_attention():
 
     assert len(findings) == 1
     finding = findings[0]
-    assert finding["title"] == "Prefix-List Entry Withdrawn"
+    assert finding["title"] == "Prefix-List Entry Removed"
     assert finding["impact"] == "Attention"
     assert finding["classification"] == "Routing"
     assert finding["subject"] == ["ISP-OUT", "seq 40"]
     assert ("Entry", "permit 198.51.100.243/32", "Not Present") in finding["fields"]
     assert finding["evidence"] == "show ip prefix-list"
-    assert "no longer advertised" in finding["summary"]
+    assert "isn't advertised any more" in finding["summary"]
 
 
 def test_same_seq_different_prefix_is_attention():
@@ -98,7 +98,7 @@ def test_same_seq_different_prefix_is_attention():
 
     assert len(findings) == 1
     finding = findings[0]
-    assert finding["title"] == "Prefix-List Sequence Overwritten"
+    assert finding["title"] == "Prefix-List Entry Replaced"
     assert finding["impact"] == "Attention"
     assert ("Entry", "permit 198.51.100.243/32", "permit 198.51.100.244/32") in finding["fields"]
     assert "no longer appears anywhere" in finding["summary"]
@@ -121,7 +121,7 @@ def test_resequenced_entry_is_changed_not_withdrawn():
     findings = prefix_list_findings(_sections(SHOW_PRE), _sections(post))
 
     assert len(findings) == 1
-    assert findings[0]["title"] == "Prefix-List Entry Resequenced"
+    assert findings[0]["title"] == "Prefix-List Entry Moved"
     assert findings[0]["impact"] == "Changed"
     assert ("Sequence", "40", "45") in findings[0]["fields"]
 
@@ -145,7 +145,7 @@ def test_falls_back_to_running_config_when_show_is_not_captured():
     findings = prefix_list_findings(pre, post)
 
     assert len(findings) == 1
-    assert findings[0]["title"] == "Prefix-List Entry Withdrawn"
+    assert findings[0]["title"] == "Prefix-List Entry Removed"
     assert findings[0]["evidence"] == "show running-config"
 
 
@@ -186,7 +186,7 @@ def test_prefix_list_removal_reaches_verdict_attention_list_and_score(tmp_path):
     with open(report_path, encoding="utf-8") as report:
         content = report.read()
 
-    assert "Prefix-List Entry Withdrawn" in content
+    assert "Prefix-List Entry Removed" in content
     assert 'health-attention">Attention' in content
     assert "permit 198.51.100.243/32" in content
     assert "<canvas" in content

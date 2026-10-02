@@ -2,15 +2,14 @@
 
 [![ci](https://github.com/fnitguy-tech/prepost-check/actions/workflows/ci.yml/badge.svg)](https://github.com/fnitguy-tech/prepost-check/actions/workflows/ci.yml)
 
-Pre/post change validation for network maintenance windows. Capture
-device state before the change, capture it again after, and turn the
-difference into evidence you can attach to the ticket: a quick text
-diff for the on-call view and an interpreted HTML report for everyone
-else.
+**Prove your maintenance window didn't break anything.** Capture your
+devices before the change, capture them again after, and get told what
+actually changed - a quick text diff for the on-call view, and an
+interpreted HTML report you can attach to the ticket.
 
-Built for mixed Arista EOS + Palo Alto PAN-OS environments; any
-platform netmiko can SSH to works by adding an inventory entry. Every
-command it runs is a read-only `show`.
+It's built for mixed Arista EOS and Palo Alto PAN-OS. Any platform
+netmiko can SSH to works too; just add an inventory entry. Every command
+it runs is a read-only `show`.
 
 ![Report overview - health verdict, outcome summary, attention items](docs/img/report-overview.png)
 
@@ -35,7 +34,7 @@ SITE-A-SW-1    Attention 1 · Action Required 0 · Impact 31
     Prefix count changed by -195 and no entry in the expectations file covers this peer.
 
 SITE-C-SW-2    Attention 1 · Action Required 0 · Impact 5
-  Prefix-List Entry Withdrawn  ISP-OUT  seq 40
+  Prefix-List Entry Removed  ISP-OUT  seq 40
     Entry                   permit 198.51.100.243/32 → Not Present
     Evidence: show ip prefix-list
 ```
@@ -47,9 +46,9 @@ addresses, and ASNs in the sample are fictional.
 
 A fictional four-device uplink migration ships in `docs/demo/`
 ([scenario](docs/demo/NET-DEMO/SCENARIO.md)). One command runs the whole
-workflow on it: the parallel collector (netmiko is swapped for a stub
-that replays the bundled captures, so no SSH happens), zip packaging,
-the quick text diff, and the HTML report.
+workflow on it: the parallel collector, zip packaging, the quick text
+diff, and the HTML report. No SSH happens - netmiko is swapped for a
+stub that replays the bundled captures.
 
 **Linux / macOS**
 
@@ -68,10 +67,9 @@ python3 scripts/demo.py
 
 ![Terminal: parallel collection in progress, one line per device as it connects](docs/img/progress-bar.png)
 
-Devices are collected in parallel (five at a time) with a live progress
-bar; an unreachable device is logged and recorded as a `<host>_FAILED.txt`
-finding instead of aborting the run. The full demo run, precheck through
-report:
+Devices are read five at a time behind a live progress bar. An
+unreachable one is logged and recorded as a `<host>_FAILED.txt` finding,
+and the run keeps going. The full demo, precheck through report:
 
 ![Terminal: full demo run - precheck, postcheck, text diff, HTML report](docs/img/demo-terminal.png)
 
@@ -81,16 +79,19 @@ engineer reads before leaving the window:
 
 ![Quick text diff for SITE-A-SW-1: interface status, BGP summary, routes, and config changes](docs/img/quick-diff.png)
 
-Note what is *not* in that diff: uptime, BGP message counters, OSPF dead
-timers, and optic readings all moved between the two captures, and the
-normalizer dropped every one of them. SITE-B-SW-1, untouched by the change,
-reports "No meaningful changes detected."
+Now notice what *isn't* in that diff. Uptime, BGP message counters, OSPF
+dead timers, and optic readings all moved between the two captures. The
+normalizer dropped every one. SITE-B-SW-1 wasn't touched by the change,
+so it reports "No meaningful changes detected."
 
 ## Run it against your network
 
-Python 3.10+ (netmiko 4.7 needs it) and SSH reachability to your devices. Clone, install,
-fill in the inventory, then answer the prompts (ticket number, SSH username, password).
-Pick the block for your operating system.
+You need Python 3.10 or newer, which is netmiko 4.7's floor, and SSH
+reach to your devices.
+
+Clone, install, fill in the inventory, then answer the prompts - ticket
+number, SSH username, password. Pick the block for your operating
+system.
 
 ### Linux / macOS
 
@@ -111,13 +112,15 @@ machine. Run `scripts/postcheck.py` after the change and
 
 ### Windows (PowerShell)
 
-Windows PowerShell has no `source` or `$EDITOR`, and the built-in 5.1
-version does not accept `&&` between commands. Use the
-`py` launcher that the python.org installer ships: it always finds the
-real Python, whereas plain `python` often hits the Microsoft Store stub
-Windows installs by default ("Python was not found; run without
-arguments to install from the Microsoft Store"). Run these one at a
-time:
+PowerShell has no `source` or `$EDITOR`. The built-in 5.1 version won't
+accept `&&` between commands either.
+
+Use the `py` launcher from the python.org installer. It always finds the
+real Python. Plain `python` often hits the Microsoft Store stub that
+Windows ships, which answers with "Python was not found; run without
+arguments to install from the Microsoft Store."
+
+Run these one at a time:
 
 ```powershell
 cd $HOME
@@ -161,10 +164,10 @@ reopen the terminal.
 
 ### Keeping passwords out of the evidence
 
-A running-config capture carries every `secret sha512 $6$...`, BGP
-`password 7`, TACACS key, SNMP community and PAN-OS `phash` / `-AQ==`
-value on the device. If the zip is going to be attached to a ticket,
-pass `--redact-secrets` to both captures:
+A running-config capture carries every secret on the box: `secret sha512
+$6$...`, BGP `password 7`, TACACS keys, SNMP communities, and PAN-OS
+`phash` / `-AQ==` values. If that zip is going on a ticket, pass
+`--redact-secrets` to both captures:
 
 ```bash
 python3 scripts/precheck.py --redact-secrets     # Linux / macOS
@@ -176,45 +179,57 @@ py .\scripts\precheck.py --redact-secrets        # Windows (PowerShell)
 py .\scripts\postcheck.py --redact-secrets
 ```
 
-Each secret value is replaced with `<REDACTED>` before the capture is
-written, so neither the text files, the zip nor the reports ever hold
-it. The keyword and type marker stay (`username admin secret sha512
-<REDACTED>`), so a credential that was added or removed during the
-window still shows up as a change; only a password that was *rotated*
-to a different value is invisible, which is the trade-off the flag
-makes. The rules live in `modules/redact.py`, one commented line per
-pattern, with two catch-alls (crypt-style `$6$` hashes and PAN-OS
-`-AQ==` blobs) that fire whatever keyword precedes them.
+Every secret becomes `<REDACTED>` before anything is written to disk.
+The text files, the zip, and the reports never hold the real value.
+
+The keyword and type marker stay, so you still see
+`username admin secret sha512 <REDACTED>`. That means a credential added
+or removed during the window still shows up as a change. Here's the
+trade-off: a password *rotated* to a new value looks identical before
+and after, so you won't see it.
+
+The rules live in `modules/redact.py`, one commented line per pattern.
+Two catch-alls back them up - crypt-style `$6$` hashes and PAN-OS
+`-AQ==` blobs - and those fire whatever keyword comes first.
 
 ## Why this exists
 
-"Did the maintenance break anything?" is usually answered by eyeballing
-a handful of `show` commands from memory at 2 AM. This tool makes that
-answer systematic:
+It's 2 AM, the change window just closed, and someone asks whether the
+maintenance broke anything. You run a handful of `show` commands from
+memory, squint at them, and say it looks fine. You're probably right.
+You can't prove it, and you won't remember tomorrow which commands you
+checked.
 
-- **Consistent evidence.** Every window captures the same commands from
-  every device, timestamped and zipped per ticket. Nothing depends on
-  what someone remembered to check.
-- **Diffs that mean something.** Raw `show` output diffs are useless -
-  uptimes, ARP timers, and BGP message counters change every second.
-  Each command has a normalization rule that strips expected churn so
-  the diff only shows operational change.
-- **Interpretation, not just diffs.** BGP peers are parsed into
-  per-peer state and correlated with config changes: a peer going
-  `Estab → Idle(Admin)` right after a `neighbor x.x.x.x shutdown` line
-  appeared in the config is reported as one finding with its evidence,
-  rated `Attention`. Prefix-lists are parsed entry by entry, so a
-  `seq 40 permit ...` line that vanished is reported as a withdrawn
-  advertisement (`Attention`), and an existing sequence number whose
-  entry changed in place (the EOS replace-by-sequence overwrite) is
-  called out as such, instead of hiding among hundreds of grey lines in
-  the raw config diff.
+Here's the other version. You ran a precheck before the change and a
+postcheck after. Two minutes later you have one HTML file that says
+**Stable**, names the six devices it read, and lists the three things
+that differ - each with its before and after state and the `show` output
+that backs it up. You attach it to the ticket and go to bed.
 
-All device interaction is read-only `show` commands over SSH. The one
-exception, PAN-OS `set cli config-output-format set`, only changes how
-the config is *displayed* for the capture session (set-format diffs
-line-by-line; the default XML tree does not) - it modifies nothing on
-the device.
+Three things make that work:
+
+- **The same evidence every time.** Every window captures the same
+  commands from every device, timestamped and zipped per ticket. Nothing
+  depends on what someone thought to check.
+- **Diffs that mean something.** A raw `show` diff is noise - uptimes,
+  ARP timers, and BGP message counters all move every second. Each
+  command gets a normalization rule that strips the churn, so what's
+  left is real change. On one 10-device window that cut a 247 KB report
+  to 45 KB.
+- **It tells you what the change means.** A peer that goes
+  `Estab → Idle(Admin)` right after a `neighbor x.x.x.x shutdown`
+  appears in the config comes back as one `Attention` finding with both
+  halves of the evidence attached. Prefix-lists are read entry by entry,
+  so a `seq 40 permit ...` that vanished is called a removed
+  advertisement, and a sequence number quietly rewritten in place - the
+  EOS replace-by-sequence trap - gets named as that. None of it hides in
+  a wall of grey lines.
+
+Everything it runs is a read-only `show` over SSH. There's one
+exception: PAN-OS `set cli config-output-format set`. That only changes
+how the config is *printed* for the capture session, because set-format
+diffs line by line and the default XML tree doesn't. It changes nothing
+on the device.
 
 ## Workflow
 
@@ -225,90 +240,98 @@ after the window    python3 scripts/postcheck.py    -> reports/<TICKET>/Postchec
 anytime after       python3 scripts/compare.py      -> reports/<TICKET>/Compare/compare_<ts>.html
 ```
 
-Each script prompts for the ticket number and SSH credentials (or takes
-`--ticket` / `--username`; the password is always prompted, never a
-flag). `compare.py` additionally takes `--inventory` for the `pairs:`
-list described under [Naming redundant pairs](#naming-redundant-pairs)
-and `--expectations` for the file described under
-[Stating what the change should do](#stating-what-the-change-should-do). Devices are collected in parallel with a live progress bar; an
-unreachable device is recorded as a `<host>_FAILED.txt` finding instead
-of aborting the run.
+Each script asks for the ticket number and your SSH credentials. You can
+pass `--ticket` and `--username` instead. The password is always
+prompted, never a flag.
 
-The HTML report is a single self-contained file: overall health verdict
-(`Stable / Changed / Attention / Action Required`), per-device impact
-scores, findings with before/after state, category and impact charts,
-and every raw diff behind a collapsible section for evidence.
+`compare.py` takes two more. `--inventory` points at the `pairs:` list
+from [Naming redundant pairs](#naming-redundant-pairs).
+`--expectations` points at the file from
+[Stating what the change should do](#stating-what-the-change-should-do).
+
+Devices are read in parallel behind a live progress bar. If one is
+unreachable, the run keeps going and writes a `<host>_FAILED.txt` so you
+know which one you're missing.
+
+The HTML report is one self-contained file. It carries the health verdict
+(`Stable / Changed / Attention / Action Required`) and a per-device impact
+score. Under that, every finding with its before and after state, the
+category and impact charts, and each raw diff folded into a collapsible
+section.
 
 Interpreted findings cover:
 
 - **BGP peers** (`show ip bgp summary`, and PAN-OS
   `show routing protocol bgp peer`): removed, added, state change,
-  administrative shutdown, prefix-count change, and **session reset**: a
-  peer that is `Estab` in both captures but whose Up/Down went from
-  `5d02h` to `00:12:33` dropped and came back during the window
-  (`Attention`). The postcheck is always taken later, so an uptime can
-  only go backwards if the session restarted; coarse formats (`1d02h`,
-  `2w3d`) are only flagged when the post value is unambiguously smaller,
-  and an unparsable value (`never`) is never flagged.
-- **Prefix-lists** (`show ip prefix-list`, or the running config when
-  that command is not captured): entry withdrawn (`Attention`), entry
-  overwritten at the same sequence number (`Attention`), entry
-  resequenced (`Changed`), entry or list added (`Stable`), list removed
-  (`Attention`).
+  shutdown, prefix-count change, and **session reset**. That last one is
+  the sneaky one: a peer reads `Estab` in both captures, but Up/Down went
+  from `5d02h` to `00:12:33`, so it dropped and came back
+  (`Attention`). The postcheck is always later, so uptime can only fall
+  if the session restarted. Coarse formats like `1d02h` and `2w3d` are
+  flagged only when the newer value is clearly smaller, and `never` is
+  never flagged at all.
+- **Prefix-lists** (`show ip prefix-list`, or the running config if you
+  didn't capture that command). Entries are rated one at a time: removed
+  (`Attention`), replaced at the same sequence number (`Attention`),
+  moved to a new sequence (`Changed`), added (`Stable`). A whole list
+  going missing is `Attention`.
 - **Expected prefix deltas.** With an expectations file (see
   [Stating what the change should do](#stating-what-the-change-should-do))
-  a prefix-count change that matches its entry is `Stable` ("as
-  planned"), one that differs from or has no entry is `Attention`, and
-  an expected change that did not happen is `Attention`. The outcome
-  summary then reads "23 as planned, 1 unexplained" instead of 24
-  identical hedges; without a file, every delta keeps the generic
-  "this may be expected when routing policy ... changes" caveat and is
-  rated `Changed`.
+  a prefix-count change that matches your entry is `Stable` ("as
+  planned"). One that misses, or that no entry covers, is `Attention`. So
+  is a change you planned for that never happened.
+
+  The outcome summary then reads "23 as planned, 1 unexplained" instead
+  of 24 identical hedges. Without a file, every delta keeps the generic
+  caveat and is rated `Changed`.
 - **Newly addressed interfaces** (`show ip interface brief`, PAN-OS
-  `show interface all`, with the running config and `show interfaces
-  status` as fallbacks): an interface that gained an IP address during
-  the window and is up is `Stable`; one that gained an address and is
-  still down is `Attention`, because the step configured cleanly and
-  still does not work. An interface whose link state the capture cannot
-  show (a PAN-OS tunnel, a config-only address with no status table) is
-  never rated.
+  `show interface all`, falling back to the running config and
+  `show interfaces status`). An interface that gained an address and came
+  up is `Stable`. One that gained an address and stayed down is
+  `Attention` - the config is fine and the link isn't. If the capture
+  can't show link state at all, as with a PAN-OS tunnel or a config-only
+  address, it isn't rated.
 - **BGP-relevant config lines.** Each device's "Configuration / Policy
   Changes" section lists the changed running-config lines that shape
-  BGP behaviour, under the block header they sit in: the `router bgp`
-  / `protocol bgp` block, `neighbor`, `peer-group`, `route-map`,
-  `prefix-list`, `access-list` / `access-group`, communities,
-  redistribution, `aggregate-address`, `bfd`, `link-state`, `shutdown`,
-  and PAN-OS `valid-networks`, `auth-profile` and `used-by`. A
-  `seq 40 permit ...` line removed inside an `ip prefix-list` block is
-  shown as such, and a prefix-count change on a peer cites that config
-  change as its evidence.
+  BGP behaviour, filed under the block header they sit in. That covers
+  the `router bgp` / `protocol bgp` block, `neighbor`, `peer-group`,
+  `route-map`, `prefix-list`, `access-list` / `access-group`,
+  communities, redistribution, `aggregate-address`, `bfd`, `link-state`,
+  `shutdown`, and the PAN-OS `valid-networks`, `auth-profile`, and
+  `used-by` keywords. A `seq 40 permit ...` line removed inside an
+  `ip prefix-list` block shows up as exactly that, and a prefix-count
+  change on a peer points at it as evidence.
 - **Pair symmetry.** Redundant pairs are inferred from hostnames that
   differ only by a trailing number (`SITE-A-SW-1` / `SITE-A-SW-2`,
   `SITE-A-FW-1` / `SITE-A-FW-2`) or listed explicitly under `pairs:` in
-  the inventory. The two postcheck captures of each pair are compared
-  against each other: same-named prefix-lists and route-maps entry for
-  entry, and PAN-OS `show high-availability state` minus the values
-  that depend on which member is active. A divergence is an
-  `Attention` finding attributed to both members, shown in its own
-  "Pair Symmetry" section near the top of the report. Only commands
-  captured on both members are compared.
+  the inventory. The two postcheck captures get compared against each
+  other: same-named prefix-lists and route-maps entry for entry, plus
+  PAN-OS `show high-availability state` minus the values that depend on
+  which member is active.
+
+  Route-map comparison skips the knobs a pair is *meant* to differ in -
+  prepend depth, local-preference, metric, and community - so you only
+  hear about differences that change which routes the members carry.
+  Anything it finds is an `Attention` finding on both members, in its own
+  "Pair Symmetry" section near the top. These findings sit outside the
+  health verdict, because they were just as true before the window as
+  after. Only commands captured on both members get compared.
 
 ![Interpreted BGP findings with impact ratings and before/after state](docs/img/report-findings.png)
 
 ![Health, category, and per-device impact charts](docs/img/report-charts.png)
 
 **See it for yourself:** [`docs/sample-report.html`](docs/sample-report.html)
-is a complete sample report for a 10-device maintenance window (download
-the raw file and open it in a browser - GitHub doesn't render repo HTML).
-All hostnames, addresses, ASNs, and identifiers in it are fictional, and
-the bulk routing-table evidence is truncated for size.
+is a complete report from a 10-device window. Download the raw file and
+open it in a browser; GitHub won't render repo HTML. Every hostname,
+address, ASN, and identifier in it is fictional, and the bulk
+routing-table evidence is cut short for size.
 
 ## Configuring the inventory
 
-`inventory/devices.yml` groups devices by platform. Each platform
-carries its netmiko `device_type` and the command list captured for it,
-so adding a device, a command, or a whole new platform never means
-editing Python:
+`inventory/devices.yml` groups devices by platform. Each platform carries
+its netmiko `device_type` and the commands to capture for it. So adding a
+device, a command, or a whole new platform never means editing Python:
 
 ```yaml
 platforms:
@@ -322,18 +345,18 @@ platforms:
 ```
 
 See `inventory/devices.example.yml` for the full curated command lists
-for Arista EOS and PAN-OS. The PAN-OS list includes IPsec/IKE tunnel
-state (`show vpn flow`, `show vpn ike-sa`, `show vpn ipsec-sa`) and
-LSVPN hub/satellite status, normalized so SPIs, rekey timers, and
-satellite login times never show up as changes but a tunnel going
+for Arista EOS and PAN-OS. The PAN-OS list adds IPsec/IKE tunnel state
+(`show vpn flow`, `show vpn ike-sa`, `show vpn ipsec-sa`) and LSVPN
+hub/satellite status. Those are normalized, so SPIs, rekey timers, and
+satellite login times never read as changes - but a tunnel going
 `active → init` does.
 
 ### Naming redundant pairs
 
 The HTML report compares the two members of a redundant pair against
-each other. Hostnames that differ only by a trailing number are paired
-automatically; pairs that are not named that way go in an optional
-top-level `pairs:` list:
+each other. If your hostnames differ only by a trailing number, it pairs
+them for you. If they don't, name them in an optional top-level `pairs:`
+list:
 
 ```yaml
 pairs:
@@ -341,18 +364,20 @@ pairs:
   - [EDGE-FW-PRIMARY, EDGE-FW-SECONDARY]
 ```
 
-`scripts/compare.py` reads `inventory/devices.yml` for that list when
-the file exists, or the file given with `--inventory`; it needs nothing
-else from the inventory, so a report can still be built on a machine
-that only has the captured evidence.
+`scripts/compare.py` looks for that list in `inventory/devices.yml`, or
+in whatever you pass to `--inventory`. It needs nothing else from the
+inventory. That way you can still build a report on a machine that only
+has the captured evidence.
 
 ### Stating what the change should do
 
-A routing change usually has a known effect on prefix counts: "SW-2
-learns three more transit prefixes over iBGP", "ISP-B sends the full
-table, 815 prefixes". Write that down in `reports/<TICKET>/expectations.yml`
-before or during the window (or anywhere, passed to `compare.py` with
-`--expectations`), one entry per device and peer:
+You usually know what a routing change should do to prefix counts. "SW-2
+learns three more transit prefixes over iBGP." "ISP-B sends the full
+table, 815 prefixes."
+
+Write that down before or during the window, one entry per device and
+peer. Put it in `reports/<TICKET>/expectations.yml`, or anywhere and pass
+it to `compare.py` with `--expectations`:
 
 ```yaml
 ticket: NET-DEMO                 # optional; must match when present
@@ -366,19 +391,22 @@ expectations:
     note: full table minus bogons   # optional, shown in the finding
 ```
 
-`docs/demo/NET-DEMO/expectations.yml` is the bundled example; the demo
-uses it so SITE-A-SW-2's `812 → 815` is reported as planned. The file
-only affects the HTML report, which is why the flag lives on
-`compare.py`: the quick text diff written by `postcheck.py` has no
-interpreted findings to rate.
+`docs/demo/NET-DEMO/expectations.yml` is the bundled example. The demo
+uses it, so SITE-A-SW-2's `812 → 815` comes back as planned.
+
+The file only changes the HTML report. That's why the flag lives on
+`compare.py` - the quick text diff from `postcheck.py` has no interpreted
+findings to rate.
 
 ### A per-change inventory
 
-For one maintenance, copy the parts of `devices.yml` you need into a
-file named for the change (`inventory/<change>-prepost.yml`) and pass it
-with `--inventory`. It sits next to `devices.yml`; nothing in the
-existing inventory is edited. The capture then covers only the devices
-in scope and can carry the commands that prove that change, for example
+For one maintenance, copy the parts of `devices.yml` you need into a file
+named for the change (`inventory/<change>-prepost.yml`) and pass it with
+`--inventory`. It sits next to `devices.yml` and you never edit the
+original.
+
+The capture then covers only the devices in scope, and it can carry the
+commands that prove that one change - for example
 `show ip bgp neighbors <peer> advertised-routes` for a peering that is
 being re-filtered.
 
@@ -390,11 +418,11 @@ Two kinds of change are easy to get wrong and easy to capture:
   `show global-protect-gateway gateway`,
   `show global-protect-gateway flow-site-to-site` and
   `show global-protect-portal satellite-cookie-expiration` next to
-  `show global-protect-gateway current-satellite`. Together they answer
-  "is every gateway still built", "is every satellite still connected"
-  and "did the cookie lifetime move". The flow table's byte and packet
-  counters are normalized away, so a satellite leaving is a change and
-  traffic passing is not.
+  `show global-protect-gateway current-satellite`. Between them they
+  answer three questions. Is every gateway still built? Is every
+  satellite still connected? Did the cookie lifetime move? Byte and
+  packet counters in the flow table get normalized away, so a satellite
+  leaving counts as a change and traffic passing doesn't.
 - **Routing policy.** On the switches, `show ip prefix-list` and
   `show route-map` show the lists as the device holds them, so a peer
   that starts sending or accepting a different number of prefixes can be
@@ -432,25 +460,29 @@ docs/               ARCHITECTURE.md (design decisions), sample report + screensh
 
 ## Tests and lint
 
-Linux / macOS (on Windows, use `py -m pytest tests/` for the second line):
+Linux and macOS. On Windows, use `py -m pytest tests/` for the second
+line.
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 117 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 127 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same three commands on Python 3.12
-and the test suite alone on 3.10, the documented floor.
+CI (`.github/workflows/ci.yml`) runs all three on Python 3.12. It runs
+the tests alone on 3.10, the documented floor.
 
-The test suite covers the normalization rules, BGP summary parsing
-(including the Up/Down formats and the reset rule), prefix-list parsing
-and rating, pair inference and symmetry checks, interface address and
-link-state parsing, the expectations file, finding classification, and
-both report
-generators end-to-end against synthetic device captures, so parser
-changes can be validated without touching a live network.
+Every test is offline, against synthetic captures, so you can change a
+parser without touching a live network. They cover:
+
+- the normalization rules
+- BGP summary parsing, including the Up/Down formats and the reset rule
+- prefix-list parsing and rating
+- pair inference and the symmetry checks
+- interface addresses and link state
+- the expectations file and how findings get classified
+- both report generators, end to end
 
 ## License
 

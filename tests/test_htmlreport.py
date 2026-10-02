@@ -54,7 +54,7 @@ def test_admin_shutdown_is_attention():
     findings = bgp_neighbor_findings(pre, post, [])
 
     assert len(findings) == 1
-    assert findings[0]["title"] == "BGP Peer Administratively Disabled"
+    assert findings[0]["title"] == "BGP Peer Shut Down"
     assert findings[0]["impact"] == "Attention"
 
 
@@ -118,7 +118,7 @@ def test_build_html_report_end_to_end(tmp_path):
 
     assert "NET-1" in content
     assert "switch1.txt" in content
-    assert "BGP Peer Administratively Disabled" in content
+    assert "BGP Peer Shut Down" in content
     assert "neighbor 203.0.113.1 shutdown" in content
     assert content.count("<canvas") == 3
 

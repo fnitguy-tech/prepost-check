@@ -78,8 +78,8 @@ def test_uptime_going_backwards_is_a_reset():
     assert finding["impact"] == "Attention"
     assert finding["classification"] == "Protocol"
     assert ("Up/Down", "5d02h", "00:12:33") in finding["fields"]
-    assert "torn down and re-established" in finding["summary"]
-    assert "Prefix counts are unchanged." in finding["summary"]
+    assert "dropped and came back during the window" in finding["summary"]
+    assert "Prefix counts came back the same." in finding["summary"]
 
 
 def test_uptime_growing_is_not_a_finding():

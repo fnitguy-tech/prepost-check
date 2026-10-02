@@ -127,7 +127,7 @@ def test_prefix_list_divergence_is_attention_on_both_devices():
 
     assert len(findings) == 1
     finding = findings[0]
-    assert finding["title"] == "Pair Prefix-List Divergence"
+    assert finding["title"] == "Pair Prefix-Lists Differ"
     assert finding["impact"] == "Attention"
     assert finding["devices"] == ["SITE-A-SW-1", "SITE-A-SW-2"]
     assert finding["subject"] == ["SITE-A-SW-1 vs SITE-A-SW-2", "ISP-OUT"]
@@ -153,7 +153,7 @@ def test_lists_present_on_one_member_only_are_not_compared_unless_both_had_them(
     # Both had it before the window and one lost it: that is a finding.
     findings = pair_findings(pair, sw1, sw2, pre_a=sw1, pre_b=sw1)
     assert [f["title"] for f in findings] == ["Pair Prefix-List Missing On One Device"]
-    assert "SITE-A-SW-2 no longer has it" in findings[0]["summary"]
+    assert "SITE-A-SW-2 lost prefix-list ISP-OUT during this window" in findings[0]["summary"]
 
 
 def test_route_map_divergence_lists_the_differing_lines():
@@ -164,7 +164,7 @@ def test_route_map_divergence_lists_the_differing_lines():
 
     findings = pair_findings(pair, sw1, sw2)
 
-    assert [f["title"] for f in findings] == ["Pair Route-Map Divergence"]
+    assert [f["title"] for f in findings] == ["Pair Route-Maps Differ"]
     assert findings[0]["impact"] == "Attention"
     assert ("removed", "SITE-A-SW-1: match ip address prefix-list ISP-OUT") in findings[0]["detail"]
     assert ("added", "SITE-A-SW-2: match ip address prefix-list ISP-Out") in findings[0]["detail"]
@@ -210,7 +210,7 @@ def test_route_map_next_hop_still_diverges_despite_tuning():
 
     findings = pair_findings(pair, sw1, sw2)
 
-    assert [f["title"] for f in findings] == ["Pair Route-Map Divergence"]
+    assert [f["title"] for f in findings] == ["Pair Route-Maps Differ"]
     assert ("added", "SITE-A-SW-2: set ip next-hop 192.0.2.9") in findings[0]["detail"]
 
 
@@ -229,7 +229,7 @@ def test_ha_cookie_split_is_attention_but_active_passive_is_not():
     assert pair_findings(pair, fw1, fw2_in_sync) == []
 
     findings = pair_findings(pair, fw1, fw2_split)
-    assert [f["title"] for f in findings] == ["Pair HA State Divergence"]
+    assert [f["title"] for f in findings] == ["Pair HA State Differs"]
     assert findings[0]["classification"] == "Protocol"
     assert findings[0]["fields"] == [("Local Information/Session Synchronization Cookie", "0x5", "0x0")]
 
@@ -256,7 +256,7 @@ def test_pair_finding_counts_on_both_devices_and_once_in_totals(tmp_path):
     analysis = analyze(str(pre_run), str(post_run))
 
     assert analysis["pairs"] == [("SITE-A-SW-1", "SITE-A-SW-2")]
-    assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-List Divergence"]
+    assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-Lists Differ"]
 
     by_name = {report["file_name"]: report for report in analysis["device_reports"]}
     # SW-2 also has its own per-device overwrite finding; SW-1 only the pair one.
@@ -279,7 +279,7 @@ def test_pair_finding_counts_on_both_devices_and_once_in_totals(tmp_path):
 
     assert "Pair Symmetry" in content
     assert content.index("Pair Symmetry") < content.index("Device Findings")
-    assert "Pair Prefix-List Divergence" in content
+    assert "Pair Prefix-Lists Differ" in content
     assert "SITE-A-SW-1 vs SITE-A-SW-2" in content
     # Both members land in the attention list.
     assert 'href="#device-site-a-sw-1"' in content
@@ -298,7 +298,7 @@ def test_explicit_pairs_reach_analyze(tmp_path):
 
     analysis = analyze(str(pre_run), str(post_run), pairs=[["CORE-EAST", "CORE-WEST"]])
     assert analysis["pairs"] == [("CORE-EAST", "CORE-WEST")]
-    assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-List Divergence"]
+    assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-Lists Differ"]
 
 
 def test_ha_group_label_does_not_desynchronize_every_key():
@@ -375,7 +375,7 @@ def test_health_verdict_ignores_pair_symmetry(tmp_path):
 
     analysis = analyze(str(pre_run), str(post_run))
 
-    assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-List Divergence"]
+    assert [f["title"] for f in analysis["pair_findings"]] == ["Pair Prefix-Lists Differ"]
     assert analysis["symmetry_totals"]["Attention"] == 1
     assert analysis["window_totals"] == {"Stable": 0, "Changed": 0, "Attention": 0, "Action Required": 0}
 

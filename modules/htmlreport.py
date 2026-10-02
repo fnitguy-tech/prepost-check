@@ -589,7 +589,10 @@ def bgp_finding(classification, category, impact, title, peer, before, after, su
 # honest thing to say when nobody wrote down what the change was meant
 # to do; once an expectations file exists it is replaced by "as planned"
 # or "unexplained".
-PREFIX_DELTA_HEDGE = "This may be expected when routing policy, communities, failover, or advertised routes change."
+PREFIX_DELTA_HEDGE = (
+    "That's normal if this window touched routing policy, communities, failover, or advertised routes. "
+    "Write the expected count into the expectations file and the next run will rate it for you."
+)
 
 
 def prefix_delta_finding(peer, before, after, delta, expectations, evidence):
@@ -627,13 +630,13 @@ def prefix_delta_finding(peer, before, after, delta, expectations, evidence):
     if met:
         return bgp_finding(
             "Routing", "BGP prefixes", "Stable", "BGP Prefix Count Changed As Planned", peer, before, after,
-            f"Prefix count changed by {delta:+d}, matching the expectation of {planned}.{note}",
+            f"Prefix count changed by {delta:+d}, which is what you planned for ({planned}).{note}",
             evidence,
         )
 
     return bgp_finding(
         "Routing", "BGP prefixes", "Attention", "BGP Prefix Count Differs From Expectation", peer, before, after,
-        f"Prefix count changed by {delta:+d}; the expectation was {planned}.{note}",
+        f"Prefix count changed by {delta:+d}, but you planned for {planned}.{note}",
         evidence,
     )
 
@@ -656,7 +659,8 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes, expectati
         findings.append(bgp_finding(
             "Protocol", "BGP state", "Attention", "BGP Peer Removed From Summary",
             before, before, None,
-            "This peer appeared in the precheck but was not present in the postcheck BGP summary.",
+            "This peer is in the precheck and gone from the postcheck. Either the neighbor was removed "
+            "from the config, or the session never came back.",
             "show ip bgp summary",
         ))
 
@@ -666,7 +670,8 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes, expectati
         findings.append(bgp_finding(
             "Protocol", "BGP state", "Stable", "BGP Peer Added",
             after, None, after,
-            "This peer was not present in the precheck but appeared in the postcheck BGP summary.",
+            "This peer isn't in the precheck and shows up in the postcheck. It's new since the window "
+            "started.",
             "show ip bgp summary",
         ))
 
@@ -687,15 +692,15 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes, expectati
             if before["state"] == "Idle(Admin)" and after["state"] == "Estab":
                 title = "BGP Peer Activated"
                 impact = "Stable"
-                summary = "The peer transitioned from administratively idle to established."
+                summary = "Someone un-shut this peer during the window and it came up."
             elif before["state"] == "Estab" and after["state"] == "Idle(Admin)":
-                title = "BGP Peer Administratively Disabled"
+                title = "BGP Peer Shut Down"
                 impact = "Attention"
-                summary = "The peer transitioned from established to administratively idle."
+                summary = "Someone shut this peer down during the window. It's idle on purpose, not broken."
             else:
                 title = "BGP Peer State Changed"
                 impact = "Attention"
-                summary = "The peer state changed between precheck and postcheck."
+                summary = "This peer isn't in the state it started the window in."
 
             findings.append(bgp_finding(
                 "Protocol", "BGP state", impact, title, after, before, after, summary, detected_evidence,
@@ -708,16 +713,15 @@ def bgp_neighbor_findings(pre_sections, post_sections, config_changes, expectati
             after_received = int(after["prefixes_received"]) if after["prefixes_received"].isdigit() else 0
             delta = after_received - before_received
             prefix_note = (
-                "Prefix counts are unchanged." if delta == 0 and before["prefixes_accepted"] == after["prefixes_accepted"]
-                else f"Prefix count changed by {delta:+d} across the reset."
+                "Prefix counts came back the same." if delta == 0 and before["prefixes_accepted"] == after["prefixes_accepted"]
+                else f"Prefix count also changed by {delta:+d} across the reset."
             )
 
             findings.append(bgp_finding(
                 "Protocol", "BGP state", "Attention", "BGP Session Reset", after, before, after,
-                f"The peer is established in both captures but its session uptime went from "
-                f"{before['updown']} to {after['updown']}. The postcheck is taken after the precheck, so an "
-                f"uninterrupted session can only show a larger value: this session was torn down and "
-                f"re-established during the window. {prefix_note}",
+                f"This session dropped and came back during the window. It reads Established in both "
+                f"captures, so nothing else gives it away - but uptime went from {before['updown']} to "
+                f"{after['updown']}, and a session that never dropped can only count up. {prefix_note}",
                 detected_evidence,
             ))
 
@@ -864,8 +868,8 @@ def prefix_list_findings(pre_sections, post_sections):
             finding = prefix_list_finding(
                 "Attention", "Prefix-List Removed", name, None,
                 [("Entries", str(len(before)), "Not Present")],
-                f"The whole list ({len(before)} entries) is gone from the postcheck. Every route it permitted "
-                "is no longer matched; a route-map or neighbor that still references it matches nothing.",
+                f"Anything that still points at this list now matches nothing. All {len(before)} entries are "
+                "gone from the postcheck, so every route the list used to permit falls through.",
                 evidence,
             )
             finding["detail"] = [("removed", f"seq {seq} {rule}") for seq, rule in sorted(before.items())]
@@ -876,8 +880,8 @@ def prefix_list_findings(pre_sections, post_sections):
             finding = prefix_list_finding(
                 "Stable", "Prefix-List Added", name, None,
                 [("Entries", "Not Present", str(len(after)))],
-                f"A new list with {len(after)} entries appeared in the postcheck. It changes nothing until a "
-                "route-map or neighbor references it.",
+                f"Nothing changes yet. The postcheck has a new list of {len(after)} entries, and it does nothing "
+                "until a route-map or neighbor points at it.",
                 evidence,
             )
             finding["detail"] = [("added", f"seq {seq} {rule}") for seq, rule in sorted(after.items())]
@@ -902,10 +906,10 @@ def prefix_list_findings(pre_sections, post_sections):
                     fate = "The previous entry no longer appears anywhere in the list."
 
                 findings.append(prefix_list_finding(
-                    "Attention", "Prefix-List Sequence Overwritten", name, f"seq {seq}",
+                    "Attention", "Prefix-List Entry Replaced", name, f"seq {seq}",
                     entry_fields(seq, seq, rule_before, rule_after),
-                    f"seq {seq} now holds '{rule_after}' instead of '{rule_before}'. Configuring an existing "
-                    f"sequence number replaces that entry in place rather than adding one. {fate}",
+                    f"seq {seq} now holds '{rule_after}' instead of '{rule_before}'. Reusing a sequence number "
+                    f"replaces that entry instead of adding one, so the old line is gone. {fate}",
                     evidence,
                 ))
 
@@ -913,24 +917,25 @@ def prefix_list_findings(pre_sections, post_sections):
                 if rule_before in after_rules:
                     moved_to = next(s for s, r in sorted(after.items()) if r == rule_before)
                     findings.append(prefix_list_finding(
-                        "Changed", "Prefix-List Entry Resequenced", name, f"seq {seq}",
+                        "Changed", "Prefix-List Entry Moved", name, f"seq {seq}",
                         entry_fields(seq, moved_to, rule_before, rule_before),
-                        f"The same entry moved from seq {seq} to seq {moved_to}; what the list matches is unchanged "
-                        "unless the order relative to a deny changed.",
+                        f"The same entry moved from seq {seq} to seq {moved_to}. The list still matches the same "
+                        "routes, unless this moved it past a deny.",
                         evidence,
                     ))
                 else:
                     action = rule_before.split()[0].lower() if rule_before else "permit"
                     effect = (
-                        "If the list is applied outbound this route is no longer advertised; inbound, it is "
-                        "no longer accepted."
+                        "Applied outbound, this route isn't advertised any more. Applied inbound, it isn't "
+                        "accepted."
                         if action == "permit"
-                        else "Routes this deny stopped are no longer stopped by it."
+                        else "Routes this deny used to stop now get through."
                     )
                     findings.append(prefix_list_finding(
-                        "Attention", "Prefix-List Entry Withdrawn", name, f"seq {seq}",
+                        "Attention", "Prefix-List Entry Removed", name, f"seq {seq}",
                         entry_fields(seq, None, rule_before, None),
-                        f"'{rule_before}' at seq {seq} is gone and is not re-added at another sequence. {effect}",
+                        f"'{rule_before}' at seq {seq} is gone, and it doesn't come back at another sequence. "
+                        f"{effect}",
                         evidence,
                     ))
 
@@ -1209,7 +1214,8 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
                     "Routing", "Pair Prefix-List Missing On One Device", pair, [name],
                     [("Entries", str(len(entries_a)) if entries_a else "Not Present",
                       str(len(entries_b)) if entries_b else "Not Present")],
-                    f"Both members had prefix-list {name} in the precheck; {missing_on} no longer has it.",
+                    f"{missing_on} lost prefix-list {name} during this window. Both members had it in the "
+                    "precheck.",
                     source,
                 ))
             continue
@@ -1222,11 +1228,10 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
                 for seq in differing
             ]
             findings.append(pair_finding(
-                "Routing", "Pair Prefix-List Divergence", pair, [name], fields,
-                f"Prefix-list {name} differs between the two members at {len(differing)} sequence(s). "
-                "A redundant pair is expected to carry the same policy; a one-sided edit (or an "
-                "overwritten sequence on one side) advertises or accepts different routes depending on "
-                "which member a peer talks to.",
+                "Routing", "Pair Prefix-Lists Differ", pair, [name], fields,
+                f"A peer gets different routes depending on which member it lands on. Prefix-list {name} "
+                f"differs at {len(differing)} sequence(s), and a redundant pair is supposed to carry the same "
+                "policy. Either one side was edited alone, or a sequence got overwritten on one side.",
                 source,
             ))
 
@@ -1246,7 +1251,8 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
                     "Routing", "Pair Route-Map Missing On One Device", pair, [name],
                     [("Lines", str(len(body_a)) if body_a else "Not Present",
                       str(len(body_b)) if body_b else "Not Present")],
-                    f"Both members had route-map {name} in the precheck; {missing_on} no longer has it.",
+                    f"{missing_on} lost route-map {name} during this window. Both members had it in the "
+                    "precheck.",
                     map_source,
                 ))
             continue
@@ -1276,12 +1282,13 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
                 detail.append(("added", f"{b}: {line[2:]}"))
 
         findings.append(pair_finding(
-            "Routing", "Pair Route-Map Divergence", pair, [name],
+            "Routing", "Pair Route-Maps Differ", pair, [name],
             [("Lines", str(len(body_a)), str(len(body_b))),
              ("Differing lines", str(sum(1 for kind, _ in detail if kind == "removed")),
               str(sum(1 for kind, _ in detail if kind == "added")))],
-            f"Route-map {name} differs between the two members. Lines only on {a} are shown in red, "
-            f"lines only on {b} in green.",
+            f"Route-map {name} differs between the two members in a way that isn't preference tuning. "
+            f"Lines only on {a} are red, lines only on {b} are green. This skips prepend depth, "
+            "local-preference, metric, and community, because a pair is meant to differ in those.",
             map_source,
             detail,
         ))
@@ -1296,10 +1303,10 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
         if differing:
             fields = [(key, ha_a.get(key, "Not Present"), ha_b.get(key, "Not Present")) for key in differing]
             findings.append(pair_finding(
-                "Protocol", "Pair HA State Divergence", pair, ["high-availability"], fields,
-                "HA state values that should match on both members of a healthy pair differ (role-dependent "
-                "values such as State and Priority are ignored). A version, sync or cookie mismatch means "
-                "one member did not receive what the other did.",
+                "Protocol", "Pair HA State Differs", pair, ["high-availability"], fields,
+                f"These two members disagree on {len(differing)} HA value(s) that a healthy pair keeps in sync. "
+                "Values that depend on which member is active - state, priority, and addresses - don't count. "
+                "A version, sync, or cookie mismatch means one member didn't get what the other did.",
                 ha_command,
             ))
 
@@ -1318,13 +1325,11 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
                       for key in mismatched]
             findings.append(pair_finding(
                 "Protocol", "Pair HA Content Version Mismatch", pair, ["high-availability"], fields,
-                f"The pair reports {len(mismatched)} content version(s) as Mismatch between the two members. "
-                "Both members print the same verdict, so this is the pair disagreeing with itself rather "
-                "than one capture differing from the other. A content version that differs across the pair "
-                "means policy that depends on it - an application, a threat signature, an IoT device "
-                "profile - can evaluate differently after a failover than before it. Compare "
-                "'show system info' on both members to find which file is behind, then push that update "
-                "to the member that is stale.",
+                f"This pair disagrees with itself: {len(mismatched)} content version(s) read Mismatch. Both "
+                "members print the same verdict, so comparing the two captures can't catch it. Policy that "
+                "leans on that content - an application, a threat signature, an IoT device profile - can "
+                "decide differently after a failover than before it. Run 'show system info' on both members "
+                "to see which file is behind, then push that update to the stale one.",
                 ha_command,
             ))
 
@@ -1566,13 +1571,13 @@ def interface_findings(pre_sections, post_sections):
                 "classification": "Interface",
                 "category": "Interface address",
                 "impact": "Attention",
-                "title": "Newly Addressed Interface Down",
+                "title": "New Address, Interface Still Down",
                 "subject": [name, after["address"]],
                 "fields": fields,
                 "summary": (
-                    f"{name} gained {after['address']} during the window but is '{after['status']}' in the "
-                    "postcheck: the address was configured cleanly and the interface still does not work. "
-                    "Check the admin state, the cable or the far end before closing the window."
+                    f"The config is fine and the link isn't. {name} gained {after['address']} during the "
+                    f"window but reads '{after['status']}' in the postcheck. Check the admin state, the cable, "
+                    "or the far end before you close the window."
                 ),
                 "evidence": evidence,
             })
@@ -1934,27 +1939,27 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, expectation
     if overall_health == "Stable":
         assessment_text = "Nothing changed between the precheck and the postcheck beyond expected churn."
     elif overall_health == "Changed":
-        assessment_text = "Meaningful changes were detected, but no immediate attention markers were identified."
+        assessment_text = "Something changed, but nothing needs your attention."
     elif overall_health == "Attention":
-        assessment_text = "Operational changes were detected that should be reviewed. Click the Attention card to jump to items requiring review."
+        assessment_text = "Something changed that you should look at. Click Attention to jump to it."
     else:
-        assessment_text = "One or more findings may require action. Click Action Required to jump to the highest-priority items."
+        assessment_text = "Something here may need fixing. Click Action Required to jump to it."
 
     if symmetry_count:
         assessment_text += (
-            f" Separately, {symmetry_count} pair-symmetry finding(s) describe how the two members of a "
-            "redundant pair differ from each other right now. They are not changes from this window - they "
-            "were as true in the precheck - and they are listed under Pair Symmetry."
+            f" Separately, {symmetry_count} pair-symmetry finding(s) say how the two members of a redundant "
+            "pair differ from each other right now. This window didn't cause them - they were just as true in "
+            "the precheck - so they're listed on their own under Pair Symmetry."
         )
 
     summary_items = []
 
     for classification, count in total_findings_by_classification.items():
         if count:
-            summary_items.append(f"{count} {classification.lower()} finding/evidence item(s) detected.")
+            summary_items.append(f"{count} {classification.lower()} item(s).")
 
     if not summary_items:
-        summary_items.append("No meaningful findings detected.")
+        summary_items.append("Nothing worth reporting.")
 
     if analysis.get("expectations_in_play"):
         totals = analysis["expectation_totals"]
@@ -2513,7 +2518,7 @@ details .diff-box {{
         """)
         html_parts.append("</div>")
     else:
-        html_parts.append('<p class="empty">No attention-level findings detected.</p>')
+        html_parts.append('<p class="empty">Nothing needs your attention.</p>')
 
     html_parts.append("""
     </div>

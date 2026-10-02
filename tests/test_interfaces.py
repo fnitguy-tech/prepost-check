@@ -125,7 +125,7 @@ def test_newly_addressed_interface_that_is_down_is_attention():
 
     assert len(findings) == 1
     finding = findings[0]
-    assert finding["title"] == "Newly Addressed Interface Down"
+    assert finding["title"] == "New Address, Interface Still Down"
     assert finding["impact"] == "Attention"
     assert finding["classification"] == "Interface"
     assert finding["subject"] == ["Ethernet50/1", "198.51.100.10/30"]
@@ -161,7 +161,7 @@ def test_panos_newly_addressed_port_down_is_attention_and_tunnel_is_never_rated(
     findings = interface_findings(pre, post)
 
     assert [f["subject"][0] for f in findings] == ["ethernet1/3"]
-    assert findings[0]["title"] == "Newly Addressed Interface Down"
+    assert findings[0]["title"] == "New Address, Interface Still Down"
 
     # tunnel.1 appears with an address only in the postcheck but has no
     # link state: no status, no rating.
@@ -190,7 +190,7 @@ def test_config_address_with_interfaces_status_fallback():
 
     findings = interface_findings(pre, post)
 
-    assert [f["title"] for f in findings] == ["Newly Addressed Interface Down"]
+    assert [f["title"] for f in findings] == ["New Address, Interface Still Down"]
     assert findings[0]["evidence"] == "running config + show interfaces status"
 
     # Same config change, nothing that reports link state: never rated.
@@ -224,6 +224,6 @@ def test_down_interface_reaches_the_report(tmp_path):
     with open(report_path, encoding="utf-8") as report:
         content = report.read()
 
-    assert "Newly Addressed Interface Down" in content
+    assert "New Address, Interface Still Down" in content
     assert 'health-attention">Attention' in content
     assert "198.51.100.10/30" in content
