@@ -84,10 +84,15 @@ def runs_for(ticket_dir):
                 continue
 
             captured, failed = captured_devices(path)
+            when = parse_run_timestamp(match.group(2))
             found.append({
                 "phase": phase,
                 "stamp": match.group(2),
-                "when": parse_run_timestamp(match.group(2)),
+                "when": when,
+                # The same moment as a string, because `when` is a datetime
+                # for the ordering and the direction check and the UI needs
+                # something it can serialise.
+                "when_text": when.strftime("%d %b %Y, %H:%M") if when else match.group(2),
                 "path": path,
                 "label": display_path(path),
                 "devices": captured,
@@ -234,6 +239,15 @@ class ReversedRuns(Exception):
     """Raised when the second run was captured before the first."""
 
 
+class NoSharedDevices(Exception):
+    """Raised when two runs have no device in common."""
+
+
+def shared_devices(before, after):
+    """Hostnames captured in both runs."""
+    return sorted(set(before["devices"]) & set(after["devices"]))
+
+
 def in_order(before, after):
     """True when `after` was captured at or after `before`.
 
@@ -258,8 +272,22 @@ def compare_runs(before, after, reports_dir=None, stamp=None, notes_text=None, a
 
     Raises `ReversedRuns` when `after` is the earlier capture, unless you
     pass `allow_reversed`. See `in_order()` for why that matters.
+
+    Raises `NoSharedDevices` when the two runs captured different fleets.
+    The analysis works device by device on files present in both, so two
+    unrelated windows produce a report with nothing in it - which reads as
+    "nothing changed" rather than "these have nothing to compare".
     """
     from modules import htmlreport
+
+    shared = shared_devices(before, after)
+
+    if not shared:
+        raise NoSharedDevices(
+            f"{before['ticket']} {before['phase']} and {after['ticket']} {after['phase']} have no "
+            f"device in common ({len(before['devices'])} and {len(after['devices'])} captured). "
+            "There would be nothing to compare."
+        )
 
     if not allow_reversed and not in_order(before, after):
         raise ReversedRuns(

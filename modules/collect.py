@@ -118,12 +118,17 @@ def create_zip(folder_name, zip_name):
             zip_file.write(file_path, arcname=file_name)
 
 
-def run_collection(jobs, phase, phase_dir, run_timestamp, console, redact_secrets=False):
+def run_collection(jobs, phase, phase_dir, run_timestamp, console, redact_secrets=False, progress=None):
     """Collect all devices for one phase ('precheck' or 'postcheck').
 
     With redact_secrets, every command's output is passed through
     modules.redact.scrub() before it is written, so passwords, hashes
     and keys never land in the capture files or the zip.
+
+    progress: somewhere to report to instead of a terminal bar. Anything
+    with rich's Progress interface works - add_task, update, advance, and
+    a console with log() - which is how the desktop window watches a run
+    without this module knowing a window exists.
 
     Returns (folder_name, zip_name) of the run that was just written.
     """
@@ -134,13 +139,16 @@ def run_collection(jobs, phase, phase_dir, run_timestamp, console, redact_secret
 
     total_commands = sum(len(job["commands"]) for job in jobs)
 
-    with Progress(
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        console=console,
+    with (
+        progress
+        or Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        )
     ) as progress:
 
         overall_task = progress.add_task(

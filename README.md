@@ -85,6 +85,34 @@ dead timers, and optic readings all moved between the two captures. The
 normalizer dropped every one. SITE-B-SW-1 wasn't touched by the change,
 so it reports "No meaningful changes detected."
 
+## Prefer a window to a prompt
+
+Everything below works from the terminal, and the terminal is still the
+fastest way to do it. If you'd rather click, there's a window:
+
+```bash
+pip install -r requirements-gui.txt    # once
+python3 scripts/gui.py
+```
+
+One screen runs the window - ticket, inventory, credentials, and the three
+buttons - and shows you what a capture would do before you press anything.
+A second writes up the window as a form. A third lists every window you have
+run and compares any two capture runs, across tickets.
+
+It is the same code underneath. The window calls the same collector, the
+same analysis and the same report builder the scripts do, and writes the
+same files. Use whichever you like, on the same `reports/` tree.
+
+Two things about how it runs. The server binds `127.0.0.1` and refuses any
+other address, and every request that reads or changes something carries a
+token minted at startup, so nothing else on the machine can drive it. The
+SSH password is held for one run, then cleared - never written to disk,
+never logged, never sent back to the page.
+
+If the webview packages are missing, `--serve` prints a URL for your browser
+instead and needs nothing beyond the normal requirements.
+
 ## Run it against your network
 
 You need Python 3.10 or newer, which is netmiko 4.7's floor, and SSH
@@ -439,7 +467,8 @@ views agree on what a tunnel change looks like.
 ## Repo layout
 
 ```
-scripts/            entry points: precheck.py, postcheck.py, compare.py, demo.py
+scripts/            entry points: precheck.py, postcheck.py, compare.py,
+                    notes.py, gui.py, demo.py
 modules/
   inventory.py      loads + validates inventory/devices.yml
   collect.py        parallel SSH capture (netmiko), zip packaging
@@ -448,6 +477,8 @@ modules/
   htmlreport.py     BGP / prefix-list / interface / pair interpretation,
                     impact scoring, HTML dashboard
   notes.py          notes.md: your write-up, rendered into the report
+  history.py        every window, and comparisons across two capture runs
+  ui/               the desktop window: local server, jobs, HTML/CSS/JS
   layout.py         reports/<TICKET>/ directory conventions
   cli.py            shared argument handling
   redact.py         --redact-secrets: strips passwords/hashes/keys from captures
