@@ -43,7 +43,8 @@ A fictional four-device uplink migration ships in `docs/demo/`
 ([scenario](docs/demo/NET-DEMO/SCENARIO.md)). One command runs the whole
 workflow on it: the parallel collector (netmiko is swapped for a stub
 that replays the bundled captures, so no SSH happens), zip packaging,
-the quick text diff, and the HTML report.
+the quick text diff, and the HTML report. Linux/macOS (on Windows,
+use the [Windows (PowerShell)](#windows-powershell) steps instead):
 
 ```bash
 git clone https://github.com/fnitguy-tech/prepost-check.git
@@ -53,8 +54,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python3 scripts/demo.py
 ```
-
-On Windows, see [Windows (PowerShell)](#windows-powershell) below.
 
 ![Terminal: parallel collection in progress, one line per device as it connects](docs/img/progress-bar.png)
 
@@ -79,7 +78,9 @@ reports "No meaningful changes detected."
 ## Run it against your network
 
 Python 3.10+ (netmiko 4.7 needs it) and SSH reachability to your devices. Clone, install,
-fill in the inventory, then answer the prompts (ticket number, SSH username, password):
+fill in the inventory, then answer the prompts (ticket number, SSH username, password).
+Linux/macOS (on Windows, use the [Windows (PowerShell)](#windows-powershell)
+steps instead):
 
 ```bash
 git clone https://github.com/fnitguy-tech/prepost-check.git
