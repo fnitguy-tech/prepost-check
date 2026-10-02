@@ -12,14 +12,14 @@ before diffing. Each command's rule keeps the operationally meaningful
 columns (e.g. a BGP peer's state and prefix counts survive; its
 up/down timer does not). That is the right call for a diff, where the
 timer differs on every capture; the interpreted HTML report reads the
-same column on purpose, because an uptime that went backwards is the
+same column, because an uptime that went backwards is the
 only trace a session that reset and recovered leaves in that table.
 """
 
-import difflib
 import os
 import re
 
+from modules import difftrim
 from modules.layout import display_path, find_latest_folder
 
 # Commands whose output is captured for evidence but is too volatile to
@@ -380,7 +380,7 @@ def write_compare_report(ticket, dirs, run_timestamp, console):
                 report.write("-" * 80 + "\n")
                 report.write("Differences detected.\n\n")
 
-                diff = difflib.ndiff(pre_lines, post_lines)
+                diff = difftrim.ndiff(pre_lines, post_lines)
 
                 for line in diff:
                     if line.startswith("- "):

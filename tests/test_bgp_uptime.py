@@ -1,7 +1,7 @@
 """BGP session uptime.
 
 The raw diff strips the Up/Down column because it moves on every
-capture. The interpreted layer reads it on purpose: a peer that reset
+capture. The interpreted layer reads it: a peer that reset
 and came straight back is Estab in both captures with the same prefix
 counts, and a smaller uptime in the postcheck is the only trace it
 leaves. These tests pin both the formats and the rule that a reset is

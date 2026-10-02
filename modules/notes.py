@@ -10,14 +10,14 @@ attached to the ticket inside the report, and shareable on its own.
 
     reports/<TICKET>/notes.md     (scripts/notes.py writes the template)
 
-The template is seeded with what the tool already knows - the ticket,
-the window times, the devices it captured - so the only thing left to
-type is judgement. Unfilled sections render as nothing; a template with
-nothing filled in renders no notes block at all, and the console says
-so rather than letting a blank skeleton look like a finished write-up.
+The template is seeded with what the tool already knows: the ticket, the
+window times, and the devices it captured. That leaves only the
+judgement to type. An empty section renders as nothing, and a template
+with nothing filled in renders no notes block at all - the console says
+so, so a blank skeleton can't pass for a finished write-up.
 
-The Markdown subset is deliberately tiny, because the Rust port has to
-produce byte-identical HTML from the same file:
+The Markdown subset is tiny, because the Rust port has to produce
+byte-identical HTML from the same file:
 
     ## Heading          a section heading
     - item              a bullet
@@ -79,7 +79,7 @@ def write_template(path, ticket, precheck_label, postcheck_label, hostnames):
     """Write the template, refusing to overwrite notes that already exist.
 
     Returns True when it wrote the file, False when one was already
-    there. Never clobbers: a half-written account is worth more than a
+    there. It never overwrites: half-finished notes are more use than a
     fresh skeleton.
     """
     if os.path.exists(path):

@@ -5,9 +5,9 @@ surprised you, or what you only noticed afterwards. The notes file is
 that account, written by hand in Markdown and rendered above the
 machine findings.
 
-Two behaviours matter more than the formatting. A template nobody
-filled in must not read as a finished write-up, and an existing file
-must never be overwritten by a fresh skeleton.
+Two behaviours matter more than the formatting. A template nobody filled
+in must not pass for a finished write-up, and an existing file must never
+be overwritten by a fresh skeleton.
 """
 
 import pytest
@@ -37,7 +37,7 @@ Add the second uplink.
 
 
 def test_an_unfilled_template_renders_nothing():
-    """Six empty headings would look like a write-up. They are not one."""
+    """Six empty headings would look like a write-up."""
     template = notes.template("NET-9", "pre", "post", ["SW-1", "SW-2"])
 
     assert notes.parse(template) != []          # the headings are there
@@ -59,7 +59,7 @@ def test_the_template_names_the_devices_and_the_runs():
 
 
 def test_write_template_never_overwrites_existing_notes(tmp_path):
-    """A half-written account is worth more than a fresh skeleton."""
+    """Half-finished notes are more use than a fresh skeleton."""
     path = tmp_path / "notes.md"
 
     assert notes.write_template(str(path), "NET-9", "pre", "post", ["SW-1"]) is True

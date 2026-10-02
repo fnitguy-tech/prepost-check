@@ -26,20 +26,19 @@ per-device impact score and the charts through one path:
     evidence        which capture sections back it up
     detail          optional [(kind, text)] raw lines shown under it
 
-Normalization here is looser than modules/textcompare.py on purpose:
+Normalization here is looser than modules/textcompare.py:
 this report keeps more context lines so the collapsible raw-diff
 evidence sections read naturally.
 """
 
-import difflib
 import html
 import json
 import os
 import re
 from datetime import datetime
 
+from modules import difftrim, notes
 from modules import expectations as expectations_module
-from modules import notes
 from modules.layout import display_path, find_latest_folder
 from modules.textcompare import (
     VPN_FLOW_COMMANDS,
@@ -505,7 +504,10 @@ def bgp_config_changes(pre_sections, post_sections):
     pre_lines = pre_sections.get("show running-config", []) + pre_sections.get("show config running", [])
     post_lines = post_sections.get("show running-config", []) + post_sections.get("show config running", [])
 
-    diff = difflib.ndiff(pre_lines, post_lines)
+    if pre_lines == post_lines:
+        return []
+
+    diff = difftrim.ndiff(pre_lines, post_lines)
     important = []
     # ndiff interleaves the two sides, so each side keeps its own notion
     # of "the block this line is under": a removed line belongs to the
@@ -1276,7 +1278,7 @@ def pair_findings(pair, post_a, post_b, pre_a=None, pre_b=None):
 
         detail = []
 
-        for line in difflib.ndiff(body_a, body_b):
+        for line in difftrim.ndiff(body_a, body_b):
             if line.startswith("- "):
                 detail.append(("removed", f"{a}: {line[2:]}"))
             elif line.startswith("+ "):
@@ -1600,7 +1602,7 @@ def raw_diffs(pre_sections, post_sections):
 
         diff_lines = []
 
-        for line in difflib.ndiff(pre_lines, post_lines):
+        for line in difftrim.ndiff(pre_lines, post_lines):
             if line.startswith("- "):
                 diff_lines.append(("removed", line[2:]))
             elif line.startswith("+ "):
