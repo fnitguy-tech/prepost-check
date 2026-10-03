@@ -85,52 +85,6 @@ dead timers, and optic readings all moved between the two captures. The
 normalizer dropped every one. SITE-B-SW-1 wasn't touched by the change,
 so it reports "No meaningful changes detected."
 
-## Prefer a window to a prompt
-
-Everything below works from the terminal, and the terminal is still the
-fastest way to do it. If you'd rather click, there's a window.
-
-**In your browser**, which needs nothing you don't already have:
-
-```bash
-python3 scripts/gui.py --serve     # prints a URL, Ctrl-C to stop
-```
-
-**As a native window**, which needs pywebview and your system's webview.
-On Linux that means the venv has to see the system GTK bindings, so it
-needs `--system-site-packages`:
-
-```bash
-sudo dnf install python3-gobject webkit2gtk4.1    # Fedora/RHEL
-# sudo apt install python3-gi gir1.2-webkit2-4.1  # Debian/Ubuntu
-
-python3 -m venv --system-site-packages .venv
-.venv/bin/pip install -r requirements.txt -r requirements-gui.txt
-.venv/bin/python scripts/gui.py
-```
-
-A venv built without `--system-site-packages` can't reach those bindings,
-so the window won't open. It says so and serves your browser instead
-rather than failing.
-
-One screen runs the window - ticket, inventory, credentials, and the three
-buttons - and shows you what a capture would do before you press anything.
-A second writes up the window as a form. A third lists every window you have
-run and compares any two capture runs, across tickets.
-
-It is the same code underneath. The window calls the same collector, the
-same analysis and the same report builder the scripts do, and writes the
-same files. Use whichever you like, on the same `reports/` tree.
-
-Two things about how it runs. The server binds `127.0.0.1` and refuses any
-other address, and every request that reads or changes something carries a
-token minted at startup, so nothing else on the machine can drive it. The
-SSH password is held for one run, then cleared - never written to disk,
-never logged, never sent back to the page.
-
-If the webview packages are missing, `--serve` prints a URL for your browser
-instead and needs nothing beyond the normal requirements.
-
 ## Run it against your network
 
 You need Python 3.10 or newer, which is netmiko 4.7's floor, and SSH
@@ -486,7 +440,7 @@ views agree on what a tunnel change looks like.
 
 ```
 scripts/            entry points: precheck.py, postcheck.py, compare.py,
-                    notes.py, gui.py, demo.py
+                    notes.py, demo.py
 modules/
   inventory.py      loads + validates inventory/devices.yml
   collect.py        parallel SSH capture (netmiko), zip packaging
@@ -495,8 +449,6 @@ modules/
   htmlreport.py     BGP / prefix-list / interface / pair interpretation,
                     impact scoring, HTML dashboard
   notes.py          notes.md: your write-up, rendered into the report
-  history.py        every window, and comparisons across two capture runs
-  ui/               the desktop window: local server, jobs, HTML/CSS/JS
   layout.py         reports/<TICKET>/ directory conventions
   cli.py            shared argument handling
   redact.py         --redact-secrets: strips passwords/hashes/keys from captures
