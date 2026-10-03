@@ -12,6 +12,7 @@ but the boundary. Four properties matter:
 """
 
 import json
+import os
 import urllib.error
 import urllib.request
 
@@ -236,3 +237,54 @@ def test_the_plan_counts_what_a_capture_would_run():
     assert plan["read_only"] is True
     assert len(plan["devices"]) == 5
     assert plan["commands"] == sum(device["commands"] for device in plan["devices"])
+
+
+# -- parity with the CLI -----------------------------------------------
+
+def _write(path, version):
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(f"### show version ###\n{version}\n")
+
+
+def test_a_postcheck_from_the_window_writes_the_text_compare(tmp_path, monkeypatch):
+    """`scripts/postcheck.py` writes compare_<stamp>.txt the moment it
+    finishes. A postcheck started from the window has to leave the same two
+    files behind, or the front door you chose changes what you get."""
+    import time
+
+    from modules import collect, inventory, layout
+
+    monkeypatch.setattr(layout, "REPORTS_DIR", str(tmp_path))
+    monkeypatch.setattr(layout, "REPO_ROOT", str(tmp_path.parent))
+
+    dirs = layout.ticket_dirs("NET-1")
+    pre = f"{dirs['precheck']}/precheck_2026-01-01_00-00"
+    os.makedirs(pre)
+    _write(f"{pre}/sw-1.txt", "4.35.4M")
+
+    def fake_collection(jobs, phase, phase_dir, stamp, console, **kwargs):
+        folder = os.path.join(phase_dir, f"{phase}_{stamp}")
+        os.makedirs(folder, exist_ok=True)
+        _write(f"{folder}/sw-1.txt", "4.35.5M")
+
+        return folder, f"{folder}.zip"
+
+    monkeypatch.setattr(collect, "run_collection", fake_collection)
+    monkeypatch.setattr(
+        inventory, "load_inventory",
+        lambda path: [{"name": "a", "device_type": "arista_eos",
+                       "hosts": ["10.0.0.1"], "commands": ["show version"]}],
+    )
+
+    runner = JobRunner()
+    job = api.capture(runner, "postcheck", "NET-1", "user", "pass")
+
+    for _ in range(100):
+        if job.status != "running":
+            break
+        time.sleep(0.02)
+
+    assert job.status == "done", job.error
+    written = os.listdir(dirs["compare"])
+    assert [name for name in written if name.endswith(".txt")], written
+    assert any("wrote" in line for line in job.lines), job.lines

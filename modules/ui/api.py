@@ -21,7 +21,7 @@ import os
 
 from rich.console import Console
 
-from modules import collect, history, htmlreport, inventory, layout, notes
+from modules import collect, history, htmlreport, inventory, layout, notes, textcompare
 from modules.ui.jobs import ProgressSink
 
 
@@ -195,6 +195,19 @@ def capture(runner, phase, ticket, username, password, inventory_path=None, reda
 
         captured, failed = history.captured_devices(folder)
         job.add_line(f"captured {len(captured)}, failed {len(failed)}")
+
+        # `scripts/postcheck.py` writes the plain-text compare here, so the
+        # window does too. Same ticket, same two files either way.
+        if phase == "postcheck":
+            # Returns None when there is no precheck to diff against. It
+            # says so rather than raising, so check the path it hands back.
+            compare_path = textcompare.write_compare_report(
+                ticket, dirs, run_timestamp, _quiet_console()
+            )
+            job.add_line(
+                f"wrote {layout.display_path(compare_path)}" if compare_path
+                else "no precheck to compare against; text compare skipped"
+            )
 
         return {
             "folder": layout.display_path(folder),
