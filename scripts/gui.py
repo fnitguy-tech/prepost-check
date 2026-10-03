@@ -110,7 +110,7 @@ def main():
     args = parse_args()
 
     try:
-        app = AppServer(port=args.port)
+        app = AppServer(port=args.port, native=not args.serve)
     except OSError as error:
         print(f"Could not start the local server: {error}", flush=True)
         return 1

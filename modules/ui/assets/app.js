@@ -377,6 +377,29 @@ async function load(ticket) {
   await refreshPlan();
 }
 
+/* ── opening a report ────────────────────────────────────────────────
+ *
+ * In a browser these links are ordinary target="_blank" anchors and a new
+ * tab is exactly right. A webview has no tabs, so the click does nothing
+ * at all - which is what a report link in the native window used to do.
+ *
+ * So when the page knows it is inside the window, it hands the file to the
+ * real browser instead. That is also the better place for it: a report is a
+ * document you keep, print and send to someone, and it outlives the app. */
+
+document.addEventListener("click", (event) => {
+  const anchor = event.target.closest('a[href^="/report"]');
+
+  if (!anchor || !state.native) return;
+
+  event.preventDefault();
+  const name = new URL(anchor.href, location.origin).searchParams.get("name");
+
+  call("/api/open", { name })
+    .then((result) => toast("Opened " + result.opened + " in your browser.", true))
+    .catch((error) => toast("Could not open it: " + error.message));
+});
+
 $("inventory").onchange = refreshPlan;
 $("ticket").onchange = () => load($("ticket").value.trim());
 

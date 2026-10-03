@@ -18,6 +18,7 @@ returned. See `modules/ui/jobs.py`.
 """
 
 import os
+import webbrowser
 
 from rich.console import Console
 
@@ -283,6 +284,23 @@ def compare_runs(runner, before, after, allow_reversed=False):
     )
 
     return runner.start("comparison", label, work)
+
+
+def open_report(name):
+    """Hand a report to the machine's default browser.
+
+    The window has no tabs, so a report link cannot open one. This opens
+    the file itself rather than the server's URL: no token in the address
+    bar, and the page keeps working after the app is closed.
+    """
+    path = resolve_report(name)
+
+    if path is None:
+        raise ApiError("That report is not under reports/.")
+
+    webbrowser.open(f"file://{path}")
+
+    return {"opened": layout.display_path(path)}
 
 
 def resolve_report(name):

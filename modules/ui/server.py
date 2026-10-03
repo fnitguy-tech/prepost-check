@@ -40,7 +40,7 @@ TOKEN_BYTES = 24
 class AppServer:
     """The HTTP server, its job runner and its token."""
 
-    def __init__(self, host="127.0.0.1", port=0):
+    def __init__(self, host="127.0.0.1", port=0, native=False):
         if host not in ("127.0.0.1", "::1", "localhost"):
             raise ValueError(
                 f"refusing to bind {host}: this serves SSH credentials and a job runner, "
@@ -48,6 +48,9 @@ class AppServer:
             )
 
         self.token = secrets.token_urlsafe(TOKEN_BYTES)
+        # The page needs to know, because a report link that opens a tab in
+        # a browser does nothing at all in a webview. See /api/open.
+        self.native = native
         self.runner = JobRunner()
         self.httpd = ThreadingHTTPServer((host, port), _make_handler(self))
         self.httpd.daemon_threads = True
@@ -165,7 +168,7 @@ def _make_handler(app):
 
             if path == "/api/state":
                 ticket = (query.get("ticket") or [None])[0]
-                self._json(200, {**api.state(ticket), "token": app.token})
+                self._json(200, {**api.state(ticket), "token": app.token, "native": app.native})
                 return
 
             if path == "/api/plan":
@@ -194,6 +197,10 @@ def _make_handler(app):
         def _route_post(self, path, body):
             if path == "/api/notes":
                 self._json(200, api.save_notes(body.get("ticket", ""), body.get("text", "")))
+                return
+
+            if path == "/api/open":
+                self._json(200, api.open_report(body.get("name", "")))
                 return
 
             if path == "/api/notes/seed":

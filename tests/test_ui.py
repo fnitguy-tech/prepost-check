@@ -319,3 +319,46 @@ def test_the_assets_match_their_recorded_hashes():
             f"{name} changed. Update modules/ui/assets/ASSET_SHA256 and copy the "
             "file to netshell's crates/mw-check/assets/ as well."
         )
+
+
+# -- opening a report ---------------------------------------------------
+
+def test_the_window_hands_a_report_to_the_real_browser(tmp_path, monkeypatch):
+    """A report link is target="_blank". A browser opens a tab; a webview
+    has no tabs, so the click does nothing. In the window the page posts
+    here instead, and the file goes to the machine's browser."""
+    opened = []
+
+    monkeypatch.setattr("modules.layout.REPORTS_DIR", str(tmp_path))
+    monkeypatch.setattr("modules.layout.REPO_ROOT", str(tmp_path.parent))
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+
+    report = tmp_path / "NET-1" / "Compare" / "compare_x.html"
+    report.parent.mkdir(parents=True)
+    report.write_text("<p>ok</p>", encoding="utf-8")
+
+    label = os.path.join(tmp_path.name, "NET-1", "Compare", "compare_x.html")
+    assert api.open_report(label)["opened"] == label
+    # The file itself, not the server's URL: no token in the address bar,
+    # and it still works once the app is closed.
+    assert opened == [f"file://{report}"]
+
+    for refused in ("", "../../../etc/passwd", os.path.join(tmp_path.name, "NET-1", "notes.md.x")):
+        with pytest.raises(api.ApiError, match="under reports/"):
+            api.open_report(refused)
+
+    assert len(opened) == 1
+
+
+def test_the_page_is_told_which_front_door_it_came_through(server):
+    """`--serve` means a browser, which handles target="_blank" itself."""
+    _status, state = fetch_json(server, "/api/state")
+    assert state["native"] is False
+
+    native = AppServer(native=True)
+    try:
+        native.serve_forever_in_background()
+        _status, state = fetch_json(native, "/api/state")
+        assert state["native"] is True
+    finally:
+        native.shutdown()
