@@ -15,6 +15,11 @@
     --yellow: #f59e0b;
     --red: #ef4444;
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+    /* Form controls, scrollbars and the caret are drawn by the engine from
+       the system theme unless told otherwise. On a light GTK theme that is
+       a white <select> in the middle of a dark panel. */
+    color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -144,6 +149,8 @@ code { font-family: var(--mono); font-size: 0.92em; color: #cfe6ff; }
 input[type="text"], input[type="password"], select, textarea {
     width: 100%;
     padding: 10px 12px;
+    appearance: none;
+    -webkit-appearance: none;
     color: var(--text);
     background: var(--panel-soft);
     border: 1px solid var(--line);
@@ -153,6 +160,23 @@ input[type="text"], input[type="password"], select, textarea {
 }
 
 textarea { font-size: 14px; line-height: 1.6; resize: vertical; min-height: 86px; }
+
+/* A chevron of our own, since appearance:none takes the native one away.
+   Inline SVG so the page still loads nothing from anywhere. */
+select {
+    padding-right: 34px;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5 6 6.5 11 1.5" fill="none" stroke="%2394a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    cursor: pointer;
+}
+
+/* The dropdown list itself is a platform popup. color-scheme handles it on
+   current engines; these two are the belt and braces for older WebKitGTK. */
+select option {
+    background: #0f172a;
+    color: var(--text);
+}
 
 input:focus, select:focus, textarea:focus {
     outline: none;

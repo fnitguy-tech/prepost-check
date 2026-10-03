@@ -288,3 +288,34 @@ def test_a_postcheck_from_the_window_writes_the_text_compare(tmp_path, monkeypat
     written = os.listdir(dirs["compare"])
     assert [name for name in written if name.endswith(".txt")], written
     assert any("wrote" in line for line in job.lines), job.lines
+
+
+# -- the assets ---------------------------------------------------------
+
+def test_the_assets_match_their_recorded_hashes():
+    """The Rust port serves these same three files from its own copy.
+
+    Two repositories, one page. There is no build step to tie them
+    together, so the hashes are recorded in both and checked in both: edit
+    the CSS here without carrying it over and this fails, which is the
+    only warning either side gets.
+    """
+    import hashlib
+
+    from modules.ui.server import ASSETS_DIR
+
+    recorded = os.path.join(ASSETS_DIR, "ASSET_SHA256")
+
+    with open(recorded, encoding="utf-8") as file:
+        lines = [line.split() for line in file if line.strip()]
+
+    assert len(lines) == 3, "index.html, app.css and app.js"
+
+    for digest, name in lines:
+        with open(os.path.join(ASSETS_DIR, name), "rb") as asset:
+            actual = hashlib.sha256(asset.read()).hexdigest()
+
+        assert actual == digest, (
+            f"{name} changed. Update modules/ui/assets/ASSET_SHA256 and copy the "
+            "file to netshell's crates/mw-check/assets/ as well."
+        )

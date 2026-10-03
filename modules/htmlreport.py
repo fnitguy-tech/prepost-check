@@ -1587,7 +1587,9 @@ def classify_raw_diff_commands(diffs):
             "show routing route",
         ]:
             categories["Routing"] += 1
-        elif command in ["show interfaces status", "show interfaces trunk", "show port-channel summary", "show interfaces counters errors", "show interfaces description"]:
+        # Both port-channel spellings: "summary" is Cisco's, "dense" is
+        # EOS's, and a capture from either should land in this category.
+        elif command in ["show interfaces status", "show interfaces trunk", "show port-channel summary", "show port-channel dense", "show interfaces counters errors", "show interfaces description"]:
             categories["Interface"] += 1
         elif command in ["show mac address-table", "show vlan brief", "show lldp neighbors"]:
             categories["Layer 2"] += 1
