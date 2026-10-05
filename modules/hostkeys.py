@@ -40,21 +40,9 @@ import threading
 
 import paramiko
 
-ENV_VAR = "PREPOST_CHECK_KNOWN_HOSTS"
-
-
-def default_path():
-    """Where the known-hosts file lives unless you say otherwise."""
-    override = os.environ.get(ENV_VAR)
-
-    if override:
-        return os.path.expanduser(override)
-
-    if os.name == "nt":
-        base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
-        return os.path.join(base, "prepost-check", "known_hosts")
-
-    return os.path.join(os.path.expanduser("~"), ".config", "prepost-check", "known_hosts")
+# Re-exported so callers of this module keep working. They live in
+# hostkey_paths so the CLI can read them without loading paramiko.
+from modules.hostkey_paths import ENV_VAR, default_path  # noqa: E402,F401
 
 
 def fingerprint(key):

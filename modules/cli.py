@@ -8,7 +8,7 @@ can't land in shell history or process listings.
 
 import argparse
 
-from modules import hostkeys
+from modules import hostkey_paths
 from modules.layout import TicketError, check_ticket
 
 
@@ -65,7 +65,7 @@ def parse_args(description, needs_inventory=True):
             help=(
                 "File of SSH host keys to check each device against. A new device's key is "
                 "recorded on first connect; a changed key is refused. "
-                f"(default: {hostkeys.default_path()}, or ${hostkeys.ENV_VAR} if set)"
+                f"(default: {hostkey_paths.default_path()}, or ${hostkey_paths.ENV_VAR} if set)"
             ),
         )
         parser.add_argument(
@@ -99,5 +99,9 @@ def host_keys_from(args):
     --insecure-accept-any-host-key (accept any key, check nothing)."""
     if args.insecure_accept_any_host_key:
         return None
+
+    # Imported here, not at the top: it loads paramiko, which only the
+    # capture commands need.
+    from modules import hostkeys
 
     return hostkeys.HostKeyStore(args.known_hosts)
