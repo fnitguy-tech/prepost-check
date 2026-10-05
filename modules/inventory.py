@@ -27,6 +27,26 @@ class InventoryError(Exception):
     """Raised when the inventory file is missing or malformed."""
 
 
+class DeviceParams(dict):
+    """One device's netmiko connection settings, safe to print.
+
+    It's a plain dict, so ConnectHandler(**device) works as before. The
+    one difference: printing or logging it shows the password as "***".
+    A job that ends up in a debug line or a traceback can't leak the
+    login that way.
+
+        >>> DeviceParams(host="192.0.2.11", username="admin", password="hunter2")
+        {'host': '192.0.2.11', 'username': 'admin', 'password': '***'}
+    """
+
+    HIDDEN_KEYS = ("password", "secret", "passphrase")
+
+    def __repr__(self):
+        return repr({key: "***" if key in self.HIDDEN_KEYS and value else value for key, value in self.items()})
+
+    __str__ = __repr__
+
+
 def load_inventory(path=None):
     """Parse and validate the inventory; return the platform list."""
     path = path or DEFAULT_INVENTORY
@@ -42,6 +62,14 @@ def load_inventory(path=None):
         data = yaml.safe_load(file)
 
     if not isinstance(data, dict) or not isinstance(data.get("platforms"), list):
+        if isinstance(data, dict) and "pairs" in data:
+            # A pairs-only file is valid for compare.py, which reads
+            # nothing else. A capture needs devices to connect to.
+            raise InventoryError(
+                f"{path}: this file only has a 'pairs' list. That's enough for compare.py. "
+                "A precheck or postcheck also needs a top-level 'platforms' list of devices to capture."
+            )
+
         raise InventoryError(f"{path}: expected a top-level 'platforms' list.")
 
     platforms = data["platforms"]
@@ -79,6 +107,12 @@ def load_pairs(path=None):
 
     The HTML report can be built on a machine that has no inventory
     (only the captured evidence), so a missing file is not an error here.
+
+    Nothing but "pairs:" is read, so a file that holds only that list
+    works, and so does a full inventory or an empty file:
+
+        pairs:
+          - [CORE-EAST, CORE-WEST]
     """
     path = path or DEFAULT_INVENTORY
 
@@ -88,8 +122,14 @@ def load_pairs(path=None):
     with open(path, "r", encoding="utf-8") as file:
         data = yaml.safe_load(file)
 
+    if data is None:
+        return []
+
     if not isinstance(data, dict):
-        raise InventoryError(f"{path}: expected a YAML mapping.")
+        raise InventoryError(
+            f"{path}: expected a 'pairs:' list at the top level, like this:\n"
+            "pairs:\n  - [CORE-EAST, CORE-WEST]"
+        )
 
     return pairs_from(data, path)
 
@@ -101,12 +141,12 @@ def build_jobs(platforms, username, password):
     for platform in platforms:
         for host in platform["hosts"]:
             jobs.append({
-                "device": {
-                    "device_type": platform["device_type"],
-                    "host": host,
-                    "username": username,
-                    "password": password,
-                },
+                "device": DeviceParams(
+                    device_type=platform["device_type"],
+                    host=host,
+                    username=username,
+                    password=password,
+                ),
                 "commands": platform["commands"],
             })
 

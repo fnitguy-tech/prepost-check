@@ -163,6 +163,120 @@ If `py` is not found either, Python did not finish installing: rerun
 the python.org installer with "Add python.exe to PATH" ticked, then
 reopen the terminal.
 
+### How to tell if the capture worked
+
+**The last lines of a precheck or postcheck tell you if you can trust
+it.** A capture that missed a device is not a baseline. You want to know
+that now, not after the window has closed.
+
+You get one summary line:
+
+```text
+7 of 8 captured; 1 failed: 10.0.0.5 (authentication failed)
+```
+
+`SUCCESS` prints only when every device was captured in full. Anything
+less prints `INCOMPLETE`. The script also leaves with an exit code, so a
+wrapper script can stop on a bad capture:
+
+| Exit code | What happened | Example summary line |
+|-----------|---------------|----------------------|
+| `0` | Every device was captured in full. | `8 of 8 captured.` |
+| `1` | Some devices were captured, and some weren't. | `7 of 8 captured; 1 failed: 10.0.0.5 (unreachable)` |
+| `2` | No device was captured. | `0 of 8 captured; 1 failed: 10.0.0.5 (authentication failed); 7 not attempted` |
+
+A flag the script doesn't accept, or a ticket it can't use as a folder
+name, also exits `2`. That's Python's standard code for a usage error.
+
+The words in brackets are the short reason: `authentication failed`,
+`unreachable`, `name not found`, `host key changed`,
+`SSH connection failed`, or `capture failed`. The full error is in that
+device's `<host>_FAILED.txt`.
+
+**A slow command can't shift later answers.** Say `show ip bgp` takes
+longer than the 180-second limit. The device is still sending that
+output, and the next command would read it as its own answer. So the
+rest of that device's commands are skipped and marked in the capture:
+
+```text
+### show running-config ###
+--------------------------------------------------------------------------------
+SKIPPED after timeout on show ip bgp
+```
+
+The summary line counts that device as incomplete, and the exit code is
+`1`:
+
+```text
+7 of 8 captured; 1 incomplete: SITE-A-SW-1 (timeout on show ip bgp)
+```
+
+### A wrong password is tried once
+
+**A mistyped password is tried on one device, and then the run stops.**
+Most networks check logins against one central server, and that server
+locks an account after a few bad tries. At five devices at a time, one
+typo could lock you out in the first second of your window.
+
+So the first connection goes alone. Once a device accepts the password,
+the rest connect five at a time. If a device rejects it, no more devices
+are tried, and the run tells you which one said no:
+
+```text
+INCOMPLETE
+0 of 8 captured; 1 failed: 10.0.0.5 (authentication failed); 7 not attempted
+Stopped early: 10.0.0.5 rejected the username or password. Check the password, then run again.
+```
+
+Each device that wasn't tried gets a `<host>_FAILED.txt` that starts
+with `NOT ATTEMPTED`, so the reports still list it.
+
+One limit to know about. After the password has worked once, devices
+connect in parallel. If one of them then rejects it, new connections
+stop, but up to four that had already started will finish.
+
+### SSH host keys
+
+**Each device's SSH host key is checked before your password is sent.**
+Your password goes to whatever answers at the device's address. The host
+key is the only thing that tells the real device from something else on
+that address.
+
+It works the way `ssh` does. The first time you connect to a device, its
+key is saved, one line per device:
+
+```text
+192.0.2.11 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPWUuvvn72gGpK5huKh1JezglZ6Wv72ywrrJtSlEu1m2
+```
+
+Every later run compares the device's key to that line. If it's
+different, the connection is refused, and the device is recorded as
+failed with the reason `host key changed`:
+
+```text
+The SSH host key for 192.0.2.11 has changed, so the connection was refused before any password was sent.
+  Key on file:  ssh-ed25519 SHA256:4AvRfoRDXpc4zJOcquitROkQjIN/Hjo74ajPHdQGm1Q
+  Key offered:  ssh-ed25519 SHA256:Y6mn3cK2XtTmdBfN9r7s5KAGM9N22x8z88RQ3cSS1kM
+  File:         /home/you/.config/prepost-check/known_hosts
+If this device was replaced or re-imaged, that's expected. To accept the new key, delete the line that starts with "192.0.2.11 " from that file, or run:
+  ssh-keygen -R "192.0.2.11" -f "/home/you/.config/prepost-check/known_hosts"
+Then run again, and the new key is recorded. If nothing was replaced, stop and find out what's answering at that address.
+```
+
+Where the file lives, and how to change that:
+
+| You want | Do this |
+|----------|---------|
+| The default on Linux and macOS | Nothing. It's `~/.config/prepost-check/known_hosts`. |
+| The default on Windows | Nothing. It's `%APPDATA%\prepost-check\known_hosts`. |
+| Another file for every run | Set the `PREPOST_CHECK_KNOWN_HOSTS` environment variable to its path. |
+| Another file for one run | Pass `--known-hosts /path/to/file`. |
+| No checking at all | Pass `--insecure-accept-any-host-key`. Any key is accepted and nothing is saved. Use it only on a lab you trust. |
+
+The tool keeps its own file and never reads or changes
+`~/.ssh/known_hosts`. Several devices can connect at once: each new key
+is added as one whole line, and the rest of the file is never rewritten.
+
 ### Keeping passwords out of the evidence
 
 A running-config capture carries every secret on the box: `secret sha512
@@ -189,9 +303,39 @@ or removed during the window still shows up as a change. Here's the
 trade-off: a password *rotated* to a new value looks identical before
 and after, so you won't see it.
 
-The rules live in `modules/redact.py`, one commented line per pattern.
-Two catch-alls back them up - crypt-style `$6$` hashes and PAN-OS
-`-AQ==` blobs - and those fire whatever keyword comes first.
+What gets redacted:
+
+| Kind of secret | Example line, after redaction |
+|----------------|-------------------------------|
+| Local users and enable passwords | `username admin secret sha512 <REDACTED>` |
+| Arista type `8a` on `password`, `secret`, and `key` | `neighbor 10.0.0.3 password 8a <REDACTED>` |
+| TACACS+ and RADIUS keys, one-line form | `tacacs-server host 10.1.1.1 key 7 <REDACTED>` |
+| TACACS+ and RADIUS keys, IOS-XE block form | ` key 7 <REDACTED>` under `radius server RAD-1` |
+| SNMP communities, including trap hosts | `snmp-server host 10.0.0.9 version 2c <REDACTED>` |
+| SNMPv3 auth and privacy keys | `auth sha <REDACTED> priv aes <REDACTED>` |
+| NTP keys | `ntp authentication-key 5 md5 <REDACTED>` |
+| OSPF, IS-IS, and BGP keys | `ip ospf message-digest-key 1 md5 <REDACTED>` |
+| HSRP and VRRP keys | `standby 10 authentication <REDACTED>` |
+| Key chains | `key-string <REDACTED>` |
+| IPsec pre-shared keys | `crypto isakmp key <REDACTED> address 192.0.2.1` |
+| Junos quoted secrets | `pre-shared-key ascii-text <REDACTED>;` |
+| PAN-OS set format | `set mgt-config users admin phash <REDACTED>` |
+| PAN-OS XML | `<phash><REDACTED></phash>` |
+| Private keys in PEM form | Everything between the `BEGIN` and `END ... PRIVATE KEY` lines |
+
+Each kind is caught with or without a type marker, so `key-string 7 0A1B`
+and a plain `key-string MyKey` are both covered. Certificates are public
+and stay as they are. A private key is redacted wherever it sits,
+including inside a certificate bundle.
+
+Three catch-alls back the rules up, and they fire whatever keyword comes
+first: crypt-style `$6$` hashes, Junos and IOS `$9$` values, and PAN-OS
+`-AQ==` blobs.
+
+The rules live in `modules/redact.py`, one commented line per pattern,
+and `tests/test_redact.py` holds one example for each. Redaction is a
+safety net, not a guarantee: a vendor's new keyword won't be caught
+until it has a rule. Read a capture before you post it somewhere public.
 
 ## Why this exists
 
@@ -253,7 +397,52 @@ Devices are read in parallel behind a live progress bar. If one is
 unreachable, the run keeps going and writes a `<host>_FAILED.txt` so you
 know which one you're missing.
 
-The HTML report is one self-contained file. It carries the health verdict
+**A device you couldn't check is never reported as fine.** Say `SW-1`
+answered before the change and is unreachable after it. Both reports put
+it first:
+
+```text
+ACTION REQUIRED: 1 device(s) could not be verified
+! SW-1 (10.0.0.5): Device unreachable after the change
+    Before: Captured. After: Failed.
+    Evidence: 10.0.0.5_FAILED.txt in the postcheck folder
+    | TCP connection to device failed.
+```
+
+In the HTML report the health verdict becomes `Action Required`, and the
+device is listed under "Devices Not Verified" above everything else,
+with the connect error as evidence. It counts in "Devices Checked" too.
+The same goes for a device that failed before the change, one that's
+missing from the after capture, and one that only shows up after.
+
+**Two warnings guard the baseline.** Both print on the console and sit
+at the top of both reports:
+
+- *The before capture is newer than the after capture.* Say you ran
+  `precheck.py` at 08:48, made the change, then ran `precheck.py` again
+  at 10:40 by mistake. The comparison would be "after against after" and
+  show no change at all. Now you're asked:
+  `The before capture is newer than the after capture. Did you run
+  before again by mistake?`
+- *A capture didn't finish.* A run stopped by Ctrl-C or a crash is
+  missing devices. Each finished run writes a small marker file,
+  `capture-complete.json`, as its last step. A folder without one is
+  called out by name. Captures made by an older version never had
+  markers, so those still compare, with a one-line note on the console.
+
+Run folders are stamped to the second (`precheck_2026-04-14_08-48-05`),
+so two runs in the same minute get a folder each.
+
+Hostnames come from the devices, so they're cleaned before they become
+file names: `2001:db8::1` is saved as `2001_db8__1.txt`. If two devices
+report the same hostname, both files get the address added
+(`localhost_192.0.2.1.txt` and `localhost_192.0.2.2.txt`), and neither
+overwrites the other. A ticket has to be a plain name like `NET-123`.
+
+The HTML report is one self-contained file. Its one outside file is
+Chart.js, pinned to an exact release and checked against a hash before
+your browser runs it. If the CDN can't be reached, the charts are
+replaced by a short note and the rest of the report is complete. It carries the health verdict
 (`Stable / Changed / Attention / Action Required`) and a per-device impact
 score. Under that, every finding with its before and after state, the
 category and impact charts, and each raw diff folded into a collapsible
@@ -443,13 +632,17 @@ scripts/            entry points: precheck.py, postcheck.py, compare.py,
                     notes.py, demo.py
 modules/
   inventory.py      loads + validates inventory/devices.yml
-  collect.py        parallel SSH capture (netmiko), zip packaging
+  collect.py        parallel SSH capture (netmiko), zip packaging,
+                    the summary line and exit code
+  hostkeys.py       SSH host-key checking: save on first use, refuse on change
+  captures.py       reads capture folders: section headers, failed and
+                    missing devices, the baseline warnings
   textcompare.py    normalization rules + quick .txt diff report
   difftrim.py       ndiff that skips the lines already matching (see below)
   htmlreport.py     BGP / prefix-list / interface / pair interpretation,
                     impact scoring, HTML dashboard
   notes.py          notes.md: your write-up, rendered into the report
-  layout.py         reports/<TICKET>/ directory conventions
+  layout.py         reports/<TICKET>/ directory conventions, safe file names
   cli.py            shared argument handling
   redact.py         --redact-secrets: strips passwords/hashes/keys from captures
 inventory/          devices.example.yml (copy to devices.yml, gitignored)
@@ -467,7 +660,7 @@ line.
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest tests/    # 127 tests, all offline - synthetic capture files
+python3 -m pytest tests/    # 259 tests, all offline - synthetic capture files
 ruff check .
 yamllint .                  # .yamllint config is checked in
 ```
@@ -485,6 +678,10 @@ parser without touching a live network. They cover:
 - interface addresses and link state
 - the notes file and how findings get classified
 - both report generators, end to end
+- the collector, against fake connections: exit codes, the stop on a
+  rejected password, timeouts, file names
+- host-key checking, with generated keys and no real SSH
+- one redaction example for every rule
 
 ## License
 

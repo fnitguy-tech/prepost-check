@@ -32,9 +32,57 @@ path - that run proved less than it looked like it did.
 Both tools run the same trim and produce the same 48 diff lines in the
 same order, which is the parity the reports rest on.
 tests/test_difftrim.py checks both halves of this.
+
+One more guard: a size cap on difflib's "fancy replace". When a block of
+lines is replaced by another block, difflib scores every old line
+against every new line to find the closest pair, lines up on it, then
+does the same again on each side. A block of 5,000 changed lines is 25
+million scores for the first pass alone, and the run takes minutes (or
+ends in a RecursionError). See FANCY_REPLACE_MAX_PAIRS below.
 """
 
 import difflib
+
+# The most line pairs difflib may score for one replaced block:
+# (old lines in the block) x (new lines in the block). Above it, the
+# block is written the plain way: every "-" line, then every "+" line
+# (the shorter side goes first, which is difflib's own rule).
+#
+# Worked example: 200 old lines replaced by 200 new ones is 40,000
+# pairs, which is at the cap and still gets the fancy treatment. 200
+# replaced by 201 is 40,200 pairs and is written plain.
+#
+# Why 40,000: the largest replaced block in the bundled demo is 4 pairs,
+# so the demo report comes out byte-for-byte the same. A block at the
+# cap (200 x 200 similar config lines) takes about 0.8 seconds on
+# Python 3.12; 300 x 300 already takes over 2.
+#
+# Nothing is lost above the cap. Both reports keep only the "-" and "+"
+# lines, so the same lines appear either way; only their order within
+# the block changes, from interleaved pairs to removed-then-added.
+FANCY_REPLACE_MAX_PAIRS = 40_000
+
+
+class _CappedDiffer(difflib.Differ):
+    """difflib.Differ with the size cap above on its fancy replace.
+
+    difflib offers no public switch for this, so the cap hooks the two
+    methods Differ.compare() itself calls for a replaced block. Both
+    have had the same signature since Python 3.0;
+    tests/test_difftrim.py fails loudly if a future Python renames them.
+    """
+
+    def _fancy_replace(self, a, alo, ahi, b, blo, bhi):
+        if (ahi - alo) * (bhi - blo) > FANCY_REPLACE_MAX_PAIRS:
+            yield from self._plain_replace(a, alo, ahi, b, blo, bhi)
+        else:
+            yield from super()._fancy_replace(a, alo, ahi, b, blo, bhi)
+
+
+def _capped_ndiff(a, b):
+    """difflib.ndiff(a, b) with the fancy-replace cap. Same defaults as
+    ndiff: no line junk, IS_CHARACTER_JUNK for the in-line hints."""
+    return _CappedDiffer(None, difflib.IS_CHARACTER_JUNK).compare(a, b)
 
 
 def ndiff(a, b):
@@ -87,7 +135,7 @@ def ndiff(a, b):
     core_b = b[head: len(b) - tail]
 
     if core_a or core_b:
-        yield from difflib.ndiff(core_a, core_b)
+        yield from _capped_ndiff(core_a, core_b)
 
     if tail:
         for line in a[len(a) - tail:]:

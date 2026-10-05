@@ -25,7 +25,9 @@ byte-identical HTML from the same file:
     - [x] item          a ticked checkbox
     `code`              inline code
     **bold**            inline bold
-    <!-- comment -->    dropped (the template's own prompts)
+    <!-- comment -->    dropped (the template's own prompts); a comment
+                        may run over several lines, and has to start
+                        its line
 
 Anything else is a paragraph. There is no nesting, no tables, and no
 links; a line that looks like one of those is shown as written.
@@ -49,7 +51,8 @@ TEMPLATE_SECTIONS = [
 HEADING = re.compile(r"^##\s+(.*\S)\s*$")
 TASK = re.compile(r"^-\s+\[([ xX])\]\s+(.*\S)\s*$")
 BULLET = re.compile(r"^-\s+(.*\S)\s*$")
-COMMENT_ONLY = re.compile(r"^\s*<!--.*-->\s*$")
+COMMENT_OPEN = "<!--"
+COMMENT_CLOSE = "-->"
 CODE_SPAN = re.compile(r"`([^`]+)`")
 BOLD_SPAN = re.compile(r"\*\*([^*]+)\*\*")
 
@@ -93,13 +96,27 @@ def write_template(path, ticket, precheck_label, postcheck_label, hostnames):
     return True
 
 
+class NotesError(Exception):
+    """Raised when a notes file exists but can't be read."""
+
+
 def load(path):
-    """The notes file's text, or None when there is no file to read."""
+    """The notes file's text, or None when there is no file to read.
+
+    A file that's there but can't be read raises NotesError. "No notes"
+    and "your notes couldn't be opened" call for different fixes, so
+    they must not print the same message. Example: a notes.md saved by
+    another user with no read permission for you.
+    """
     if not path or not os.path.exists(path):
         return None
 
-    with open(path, "r", encoding="utf-8") as file:
-        return file.read()
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return file.read()
+    except (OSError, UnicodeDecodeError) as error:
+        reason = error.strerror if isinstance(error, OSError) and error.strerror else "it isn't UTF-8 text"
+        raise NotesError(f"The notes file {path} exists but couldn't be read ({reason}).") from error
 
 
 def parse(text):
@@ -134,18 +151,28 @@ def parse(text):
 
         blocks.clear()
 
+    # True while inside a comment that opened on an earlier line.
+    in_comment = False
+
     for raw in text.splitlines():
         line = raw.rstrip()
+
+        # A comment is dropped only when it really is one: it starts its
+        # line with "<!--" and runs to the next "-->", on that line or a
+        # later one. The template's own prompt spans two lines, so the
+        # state is carried across lines. A line that merely ends in "-->"
+        # is the writer's text ("Et49/1 down --> failover") and is kept;
+        # it used to vanish from the report without a word.
+        if in_comment or line.lstrip().startswith(COMMENT_OPEN):
+            body = line if in_comment else line.lstrip()[len(COMMENT_OPEN):]
+            in_comment = COMMENT_CLOSE not in body
+            continue
+
         match = HEADING.match(line)
 
         if match:
             close_heading()
             heading = match.group(1)
-            continue
-
-        if COMMENT_ONLY.match(line) or line.lstrip().startswith("<!--") or line.rstrip().endswith("-->"):
-            # The template's prompts, and any note-to-self the writer
-            # left in comment form. Dropped, not rendered.
             continue
 
         if not line.strip():

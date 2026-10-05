@@ -107,7 +107,11 @@ def main(console=None):
     for phase in ("precheck", "postcheck"):
         collect.ConnectHandler = fake_connect_handler_for(phase)
         os.makedirs(dirs[phase], exist_ok=True)
-        _folder, zip_name = collect.run_collection(jobs, phase, dirs[phase], STAMPS[phase], console)
+        # host_keys=None: no SSH happens here, so there are no host keys
+        # to check, and the demo must not touch your known-hosts file.
+        _folder, zip_name = collect.run_collection(
+            jobs, phase, dirs[phase], STAMPS[phase], console, host_keys=None
+        )
         console.print(f"{phase.capitalize()} ZIP created: {layout.display_path(zip_name)}")
         console.print()
 

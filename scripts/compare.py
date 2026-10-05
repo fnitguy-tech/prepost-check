@@ -33,16 +33,19 @@ from modules import htmlreport, inventory, layout, notes
 from modules.cli import parse_args
 
 
-def main():
-    args = parse_args("Build the interpreted HTML maintenance report.", needs_inventory=False)
-    console = Console()
-
-    dirs = layout.ticket_dirs(args.ticket)
-    run_timestamp = layout.timestamp()
-    pairs = inventory.load_pairs(args.inventory)
-
-    notes_path = args.notes or dirs["notes"]
-    notes_text = notes.load(notes_path)
+def load_notes(notes_path, console):
+    """Read the notes file and tell the user what was found."""
+    try:
+        notes_text = notes.load(notes_path)
+    except notes.NotesError as error:
+        # Say so, and still build the report: the findings don't depend
+        # on the notes, and "no notes" would send you looking for a
+        # file that's sitting right there.
+        console.print(
+            f"[bold red]WARNING:[/bold red] {error} The report is being built without your notes.",
+            highlight=False,
+        )
+        return None
 
     if notes_text is None:
         console.print(
@@ -57,6 +60,20 @@ def main():
         # A template nobody filled in must not read as a finished
         # write-up, so say so rather than rendering empty headings.
         console.print(f"Notes: {layout.display_path(notes_path)} is still a blank template; leaving it out.")
+
+    return notes_text
+
+
+def main():
+    args = parse_args("Build the interpreted HTML maintenance report.", needs_inventory=False)
+    console = Console()
+
+    dirs = layout.ticket_dirs(args.ticket)
+    run_timestamp = layout.timestamp()
+    pairs = inventory.load_pairs(args.inventory)
+
+    notes_path = args.notes or dirs["notes"]
+    notes_text = load_notes(notes_path, console)
 
     htmlreport.build_html_report(
         args.ticket, dirs, run_timestamp, console,

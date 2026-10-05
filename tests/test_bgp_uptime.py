@@ -151,7 +151,7 @@ def test_reset_reaches_the_report(tmp_path):
     pre_run.mkdir(parents=True)
     post_run.mkdir(parents=True)
 
-    capture = "Hostname: SITE-A-SW-1\n### show ip bgp summary ###\n{row}\n"
+    capture = "Hostname: SITE-A-SW-1\n### show ip bgp summary ###\n--------------------------------------------------------------------------------\n{row}\n"
     (pre_run / "SITE-A-SW-1.txt").write_text(capture.format(row=ROW.format(updown="5d02h")))
     (post_run / "SITE-A-SW-1.txt").write_text(capture.format(row=ROW.format(updown="00:12:33")))
 

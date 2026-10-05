@@ -153,10 +153,10 @@ def _write_capture(folder, prefix_lines):
     folder.mkdir(parents=True)
     (folder / "SITE-A-SW-1.txt").write_text(
         "Hostname: SITE-A-SW-1\n"
-        "### show ip bgp summary ###\n"
+        "### show ip bgp summary ###\n--------------------------------------------------------------------------------\n"
         "  ISP-B  198.51.100.9  4 64497  213  201  0  0  00:52:40  Estab  815  815\n"
-        "### show ip prefix-list ###\n" + "\n".join(prefix_lines) + "\n"
-        "### show running-config ###\n"
+        "### show ip prefix-list ###\n--------------------------------------------------------------------------------\n" + "\n".join(prefix_lines) + "\n"
+        "### show running-config ###\n--------------------------------------------------------------------------------\n"
         "router bgp 64500\n"
         "   neighbor 198.51.100.9 remote-as 64497\n"
     )

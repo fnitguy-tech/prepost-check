@@ -27,9 +27,12 @@ inventory/devices.yml
                                       findings (optional, by hand)
 ```
 
-Capture files use `### <command> ###` section headers; both compare
-modules parse those headers to diff command-by-command rather than
-whole-file.
+Capture files use `### <command> ###` section headers with an 80-dash
+rule under each. Both compare modules read them through
+`modules/captures.py`, and diff command-by-command rather than
+whole-file. A header only counts when the dash rule follows it, so a
+banner line like `### AUTHORIZED USE ONLY ###` inside a config stays
+part of the config.
 
 ## Design decisions worth recording
 
@@ -162,6 +165,41 @@ whole-file.
   the kind of thing the evidence should show. Collection records it as
   `<host>_FAILED.txt` and carries on with the rest of the fleet.
 
+  The reports then treat "we couldn't check it" as the most serious
+  result, not as nothing. `modules/captures.py` matches a FAILED file to
+  the device's other capture by address, and both reports list it first
+  as `Action Required`. The run itself ends with a summary line and a
+  non-zero exit code (`1` some failed, `2` all failed).
+
+- **One rejected password stops the run.** Central login servers lock an
+  account after a few bad tries, and five parallel connections would use
+  those up in a second. The first connection goes alone; the rest go in
+  parallel only after a device has accepted the password.
+
+- **A timeout ends that device's capture.** After a `ReadTimeout` the
+  late output is still coming down the same connection, and the next
+  command would read it as its own. The remaining commands are written
+  as `SKIPPED after timeout on <command>`. Reconnecting was ruled out:
+  it resets session settings such as PAN-OS
+  `set cli config-output-format set`, and the config would come back in
+  another format.
+
+- **SSH host keys are trust-on-first-use.** netmiko's default accepts
+  any key and remembers none. `modules/hostkeys.py` keeps the tool's own
+  known-hosts file and refuses a changed key before the password is
+  sent. It uses netmiko's supported options (`alt_host_keys`,
+  `alt_key_file`, and a `key_policy` set on a connection built with
+  `auto_connect=False`). New keys are appended one line at a time under
+  a lock, because paramiko's own save rewrites the whole file and five
+  connections at once could drop each other's lines.
+
+- **A capture folder says whether it finished.** The last step of a run
+  writes `capture-complete.json`. A folder stamped to the second without
+  one was interrupted, and both reports warn. Folders stamped to the
+  minute come from older versions that wrote no marker; they compare
+  with a console note. The reports also warn when the before folder is
+  newer than the after folder.
+
 - **Read-only by design.** Everything sent to a device is a `show`
   command. There is one exception: PAN-OS
   `set cli config-output-format set`. That only changes how the config is
@@ -186,8 +224,11 @@ whole-file.
 
   It keeps the keyword and type marker and drops only the value, so an
   added or removed credential still diffs. A rotated one does not. Rules in `modules/redact.py` are per-pattern and
-  commented like the normalization rules, with two keyword-free
-  catch-alls (crypt-style hashes, PAN-OS `-AQ==` blobs) as a backstop.
+  commented like the normalization rules, with keyword-free
+  catch-alls (crypt-style hashes, `$9$` values, PAN-OS `-AQ==` blobs) as
+  a backstop. PEM private keys and the IOS-XE `radius server` /
+  `tacacs server` block form span lines, so `scrub()` handles those
+  before the per-line rules.
 
 - **Evidence is keyed by ticket.** `modules/layout.py` anchors all
   output to `reports/<TICKET>/` at the repo root, not the current working
@@ -196,7 +237,12 @@ whole-file.
 
 - **The HTML report is one self-contained file** so it can be attached
   to a change ticket as-is. Chart.js from a CDN is its only external
-  asset; everything else (styles, data, raw diffs) is inlined.
+  asset; everything else (styles, data, raw diffs) is inlined. The
+  script tag pins one Chart.js release and carries its SHA-384 hash, so
+  the browser refuses a changed file. Without Chart.js the charts are
+  replaced by a note and the rest of the report still reads. Values
+  written into the script block have `<`, `>`, and `&` escaped, so a
+  device name can't end the block.
 
 - **Tests run fully offline.** Every test runs against synthetic capture
   files, so you can change a parser without touching a live network. They

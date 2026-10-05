@@ -8,6 +8,9 @@ can't land in shell history or process listings.
 
 import argparse
 
+from modules import hostkeys
+from modules.layout import TicketError, check_ticket
+
 
 def parse_args(description, needs_inventory=True):
     """needs_inventory=True adds the collection flags (inventory, username,
@@ -56,6 +59,24 @@ def parse_args(description, needs_inventory=True):
                 "with <REDACTED> before anything is written to disk"
             ),
         )
+        parser.add_argument(
+            "--known-hosts",
+            metavar="FILE",
+            help=(
+                "File of SSH host keys to check each device against. A new device's key is "
+                "recorded on first connect; a changed key is refused. "
+                f"(default: {hostkeys.default_path()}, or ${hostkeys.ENV_VAR} if set)"
+            ),
+        )
+        parser.add_argument(
+            "--insecure-accept-any-host-key",
+            action="store_true",
+            help=(
+                "Skip the SSH host-key check and accept whatever key each device offers. "
+                "Your password is then sent to anything that answers at the device's address, "
+                "so use it only on a lab you trust."
+            ),
+        )
 
     args = parser.parse_args()
 
@@ -63,7 +84,20 @@ def parse_args(description, needs_inventory=True):
         args.ticket = input("Ticket: ")
 
     # Normalized so reports/<TICKET>/ is the same folder no matter how
-    # the ticket was typed.
-    args.ticket = args.ticket.strip().upper()
+    # the ticket was typed. Checked, because it becomes a folder name: a
+    # ticket of "../.." would write outside reports/.
+    try:
+        args.ticket = check_ticket(args.ticket.strip().upper())
+    except TicketError as error:
+        parser.error(str(error))
 
     return args
+
+
+def host_keys_from(args):
+    """The host-key store the capture flags ask for, or None for
+    --insecure-accept-any-host-key (accept any key, check nothing)."""
+    if args.insecure_accept_any_host_key:
+        return None
+
+    return hostkeys.HostKeyStore(args.known_hosts)

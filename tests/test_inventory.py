@@ -4,6 +4,7 @@ import pytest
 
 from modules.inventory import (
     EXAMPLE_INVENTORY,
+    DeviceParams,
     InventoryError,
     build_jobs,
     load_inventory,
@@ -77,3 +78,33 @@ def test_load_pairs_reads_and_validates(tmp_path):
     )
     with pytest.raises(InventoryError):
         load_inventory(str(bad_inventory))
+
+
+def test_a_pairs_only_file_loads_for_compare(tmp_path):
+    # What the compare docs promise: nothing but "pairs:" is needed.
+    pairs_only = tmp_path / "pairs.yml"
+    pairs_only.write_text("pairs:\n  - [CORE-EAST, CORE-WEST]\n")
+    assert load_pairs(str(pairs_only)) == [["CORE-EAST", "CORE-WEST"]]
+
+    empty = tmp_path / "empty.yml"
+    empty.write_text("# nothing yet\n")
+    assert load_pairs(str(empty)) == []
+
+    # A capture does need devices, and says so in terms of this file.
+    with pytest.raises(InventoryError) as excinfo:
+        load_inventory(str(pairs_only))
+
+    assert "only has a 'pairs' list" in str(excinfo.value)
+
+
+def test_the_password_is_masked_wherever_a_job_is_printed():
+    jobs = build_jobs(load_inventory(EXAMPLE_INVENTORY), "admin", "hunter2-not-real")
+    device = jobs[0]["device"]
+
+    for shown in (repr(device), str(device), f"{device}", repr(jobs), str(jobs[0])):
+        assert "hunter2-not-real" not in shown
+        assert "'password': '***'" in shown
+
+    # Still a real dict for netmiko: the value is there when asked for.
+    assert isinstance(device, DeviceParams)
+    assert dict(**device)["password"] == "hunter2-not-real"

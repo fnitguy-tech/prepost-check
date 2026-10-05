@@ -164,3 +164,69 @@ def test_the_trimmed_head_and_tail_come_back_as_context():
     assert stream[-1] == "  !"
     assert any(line.startswith("- ") for line in stream)
     assert any(line.startswith("+ ") for line in stream)
+
+
+# --- the fancy-replace size cap ---------------------------------------
+
+
+def _config_lines(count, tag):
+    rng = random.Random(tag)
+    return [f"   neighbor 10.{i // 250}.{i % 250}.{rng.randint(1, 250)} description {tag}-{rng.randint(0, 10**6)}" for i in range(count)]
+
+
+def test_a_five_thousand_line_changed_block_finishes_fast():
+    a = ["router bgp 65001"] + _config_lines(5000, "old") + ["end"]
+    b = ["router bgp 65001"] + _config_lines(5000, "new") + ["end"]
+
+    started = time.perf_counter()
+    out = list(difftrim.ndiff(a, b))
+    elapsed = time.perf_counter() - started
+
+    # Uncapped, difflib scores 25 million line pairs here and runs for minutes.
+    assert elapsed < 2.0, f"{elapsed:.1f}s"
+    # Nothing lost: every old line removed, every new line added, in order.
+    assert [line[2:] for line in out if line.startswith("- ")] == a[1:-1]
+    assert [line[2:] for line in out if line.startswith("+ ")] == b[1:-1]
+    assert out[0] == "  router bgp 65001" and out[-1] == "  end"
+
+
+def test_the_cap_rule_is_old_lines_times_new_lines():
+    assert difftrim.FANCY_REPLACE_MAX_PAIRS == 40_000
+
+    def interleaved(old_count, new_count):
+        # Line i of each side differs by one character, so the fancy
+        # path pairs them up ("- old", "+ new", "- old", ...). The plain
+        # path writes one block, then the other.
+        a = [f"interface Ethernet{i} description uplink-to-core-old" for i in range(old_count)]
+        b = [f"interface Ethernet{i} description uplink-to-core-new" for i in range(new_count)]
+        signs = [line[0] for line in difftrim.ndiff(a, b) if line[0] in "-+"]
+
+        return signs[:2] == ["-", "+"]
+
+    assert interleaved(200, 200)  # 40,000 pairs: at the cap, still fancy
+    assert not interleaved(200, 201)  # 40,200 pairs: plain
+
+
+def test_above_the_cap_the_shorter_side_is_written_first():
+    a = [f"old line {i}" for i in range(300)]
+    b = [f"new line {i}" for i in range(200)]
+
+    out = [line for line in difftrim.ndiff(a, b) if line[0] in "-+"]
+
+    # difflib's own plain-replace rule: fewer "+" lines than "-", so "+" first.
+    assert out == [f"+ {line}" for line in b] + [f"- {line}" for line in a]
+
+
+def test_under_the_cap_the_output_is_still_exactly_difflib():
+    a = _config_lines(150, "old")
+    b = a[:40] + _config_lines(60, "new") + a[100:]
+
+    assert list(difftrim.ndiff(a, b)) == list(difflib.ndiff(a, b))
+
+
+def test_the_difflib_hooks_the_cap_relies_on_still_exist():
+    # The cap overrides one private Differ method and calls another. If a
+    # future Python renames either, fail here with a clear message
+    # instead of silently losing the cap.
+    assert callable(getattr(difflib.Differ, "_fancy_replace", None))
+    assert callable(getattr(difflib.Differ, "_plain_replace", None))

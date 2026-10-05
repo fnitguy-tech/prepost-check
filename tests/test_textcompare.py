@@ -54,7 +54,7 @@ def test_parse_sections_and_compare_report(tmp_path):
 
     capture = (
         "Hostname: switch1\n"
-        "### show vlan brief ###\n"
+        "### show vlan brief ###\n--------------------------------------------------------------------------------\n"
         "10  users  active\n"
         "{extra}"
     )
@@ -63,7 +63,8 @@ def test_parse_sections_and_compare_report(tmp_path):
     (post_run / "switch1.txt").write_text(capture.format(extra="20  voice  active\n"))
 
     sections = parse_sections(str(pre_run / "switch1.txt"))
-    assert sections["show vlan brief"] == ["10  users  active"]
+    # The dash rule is part of the marker; it stays as the section's first line.
+    assert sections["show vlan brief"] == ["-" * 80, "10  users  active"]
 
     dirs = {
         "precheck": str(tmp_path / "Precheck"),

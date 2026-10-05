@@ -146,3 +146,45 @@ def test_prompts_and_comments_are_dropped():
 
     assert "found after the fact" not in html
     assert "<p>the cable.</p>" in html
+
+
+def test_a_line_ending_in_an_arrow_is_text_not_a_comment():
+    html = notes.render_html(
+        "## What actually happened\n\nEt49/1 went down --> traffic moved to Et50/1\n- [ ] ops - recheck A --> B\n"
+    )
+
+    assert "<p>Et49/1 went down --&gt; traffic moved to Et50/1</p>" in html
+    assert "recheck A --&gt; B" in html
+    assert notes.open_task_count("## Still open\n\n- [ ] ops - recheck A --> B\n") == 1
+
+
+def test_a_comment_spanning_lines_is_dropped_whole():
+    html = notes.render_html(
+        "## What we missed\n\n<!-- note to self:\n     ask about the\n     spare optic -->\nthe cable.\n"
+    )
+
+    assert "note to self" not in html
+    assert "ask about" not in html
+    assert "spare optic" not in html
+    assert "<p>the cable.</p>" in html
+
+
+def test_the_template_still_renders_nothing_until_it_is_filled_in():
+    # Its own two-line prompt comment ends in "-->" on the second line.
+    assert notes.render_html(notes.template("NET-1", "pre", "post", ["SW-1"])) == ""
+
+
+def test_a_notes_file_that_cannot_be_read_says_so(tmp_path):
+    unreadable = tmp_path / "notes.md"
+    unreadable.write_bytes(b"## What we missed\n\n\xff\xfe not utf-8\n")
+
+    with pytest.raises(notes.NotesError) as excinfo:
+        notes.load(str(unreadable))
+
+    assert "exists but couldn't be read" in str(excinfo.value)
+
+    # A folder where the file should be: also "can't read", not "no notes".
+    (tmp_path / "dir.md").mkdir()
+
+    with pytest.raises(notes.NotesError):
+        notes.load(str(tmp_path / "dir.md"))

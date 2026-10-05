@@ -19,7 +19,7 @@ only trace a session that reset and recovered leaves in that table.
 import os
 import re
 
-from modules import difftrim
+from modules import captures, difftrim
 from modules.layout import display_path, find_latest_folder
 
 # Commands whose output is captured for evidence but is too volatile to
@@ -282,23 +282,10 @@ def normalize_line(command, line):
 def parse_sections(file_path):
     """Split a capture file into {command: [normalized lines]}."""
     sections = {}
-    current_command = "HEADER"
-    sections[current_command] = []
 
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
-        for line in file:
-            clean_line = line.rstrip("\n")
-
-            if clean_line.startswith("### ") and clean_line.endswith(" ###"):
-                current_command = clean_line.replace("###", "").strip()
-                sections[current_command] = []
-            else:
-                normalized = normalize_line(current_command, clean_line)
-
-                if normalized is None:
-                    continue
-
-                sections[current_command].append(normalized)
+    for command, lines in captures.read_sections(file_path).items():
+        normalized = (normalize_line(command, line) for line in lines)
+        sections[command] = [line for line in normalized if line is not None]
 
     return sections
 
@@ -319,10 +306,21 @@ def write_compare_report(ticket, dirs, run_timestamp, console):
     os.makedirs(dirs["compare"], exist_ok=True)
     compare_file = os.path.join(dirs["compare"], f"compare_{run_timestamp}.txt")
 
-    pre_files = sorted(os.listdir(precheck_folder))
-    post_files = sorted(os.listdir(postcheck_folder))
+    pre_files = captures.capture_files(precheck_folder)
+    post_files = captures.capture_files(postcheck_folder)
 
-    common_files = sorted(set(pre_files) & set(post_files))
+    # common_files are captured in both runs. A device that failed or
+    # went missing has nothing to diff; it's listed up top instead, so
+    # it can't hide behind "No meaningful changes detected."
+    common_files, problems = captures.device_problems(precheck_folder, postcheck_folder)
+    warnings, notes = captures.baseline_warnings(precheck_folder, postcheck_folder)
+
+    for warning in warnings:
+        console.print(f"[bold red]WARNING:[/bold red] {warning}", highlight=False)
+
+    for note in notes:
+        console.print(f"Note: {note}", highlight=False)
+
     missing_post = sorted(set(pre_files) - set(post_files))
     new_post = sorted(set(post_files) - set(pre_files))
 
@@ -332,6 +330,9 @@ def write_compare_report(ticket, dirs, run_timestamp, console):
         report.write(f"Ticket:           {ticket}\n")
         report.write(f"Precheck Folder:  {display_path(precheck_folder)}\n")
         report.write(f"Postcheck Folder: {display_path(postcheck_folder)}\n\n")
+
+        for warning in warnings:
+            report.write(f"WARNING: {warning}\n\n")
 
         report.write("File Summary\n")
         report.write("-" * 80 + "\n")
@@ -347,6 +348,23 @@ def write_compare_report(ticket, dirs, run_timestamp, console):
         if new_post:
             report.write("New in Postcheck:\n")
             report.writelines(f"+ {file_name}\n" for file_name in new_post)
+            report.write("\n")
+
+        if problems:
+            report.write(f"ACTION REQUIRED: {len(problems)} device(s) could not be verified\n")
+            report.write("-" * 80 + "\n")
+
+            for problem in problems:
+                label = problem["name"]
+
+                if problem["address"] and problem["address"] != problem["name"]:
+                    label += f" ({problem['address']})"
+
+                report.write(f"! {label}: {problem['title']}\n")
+                report.write(f"    Before: {problem['before']}. After: {problem['after']}.\n")
+                report.write(f"    Evidence: {problem['evidence']}\n")
+                report.writelines(f"    | {line}\n" for line in problem["detail"])
+
             report.write("\n")
 
         for file_name in common_files:
@@ -390,6 +408,13 @@ def write_compare_report(ticket, dirs, run_timestamp, console):
 
             if not device_changed:
                 report.write("\nNo meaningful changes detected.\n")
+
+    if problems:
+        console.print(
+            f"[bold red]ACTION REQUIRED:[/bold red] {len(problems)} device(s) could not be verified: "
+            + ", ".join(problem["name"] for problem in problems),
+            highlight=False,
+        )
 
     console.print(f"Compare report created: {display_path(compare_file)}")
 

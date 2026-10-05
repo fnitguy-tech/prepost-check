@@ -205,11 +205,11 @@ def test_down_interface_reaches_the_report(tmp_path):
     post_run.mkdir(parents=True)
 
     (pre_run / "SITE-A-SW-1.txt").write_text(
-        "Hostname: SITE-A-SW-1\n### show ip interface brief ###\n"
+        "Hostname: SITE-A-SW-1\n### show ip interface brief ###\n--------------------------------------------------------------------------------\n"
         "Loopback0         192.0.2.1/32         up           up                65535\n"
     )
     (post_run / "SITE-A-SW-1.txt").write_text(
-        "Hostname: SITE-A-SW-1\n### show ip interface brief ###\n"
+        "Hostname: SITE-A-SW-1\n### show ip interface brief ###\n--------------------------------------------------------------------------------\n"
         "Ethernet50/1      198.51.100.10/30     down         down               1500\n"
         "Loopback0         192.0.2.1/32         up           up                65535\n"
     )

@@ -6,7 +6,8 @@ peer changes with config diffs, parses prefix-lists entry by entry,
 classifies every changed command into a category (Configuration /
 Protocol / Routing / Interface / ...), scores each device's operational
 impact, and renders a self-contained dark dashboard (Chart.js from CDN
-is its only external asset) that can be attached to a change ticket
+is its only external asset, pinned to one release and hash-checked; the
+report reads fine without it) that can be attached to a change ticket
 as-is.
 
 Impact levels, most to least severe:
@@ -37,7 +38,7 @@ import os
 import re
 from datetime import datetime
 
-from modules import difftrim, notes
+from modules import captures, difftrim, notes
 from modules.layout import display_path, find_latest_folder
 from modules.textcompare import (
     VPN_FLOW_COMMANDS,
@@ -57,21 +58,61 @@ def safe_id(value):
 
 def parse_sections(file_path):
     """Split a capture file into {command: [raw lines]} (no filtering)."""
-    sections = {}
-    current_command = "HEADER"
-    sections[current_command] = []
+    return captures.read_sections(file_path)
 
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
-        for line in file:
-            clean_line = line.rstrip("\n")
 
-            if clean_line.startswith("### ") and clean_line.endswith(" ###"):
-                current_command = clean_line.replace("###", "").strip()
-                sections[current_command] = []
-            else:
-                sections[current_command].append(clean_line)
+def script_json(value):
+    """JSON that's safe to write inside a <script> block.
 
-    return sections
+    json.dumps() alone isn't. A browser ends a script block at the first
+    "</script>" it sees, even inside a quoted string, and device names
+    go into these blocks. A hostname of
+
+        </script><script>alert(1)</script>
+
+    would close our script and start its own. Writing "<", ">", and "&"
+    as \\u003c, \\u003e, and \\u0026 keeps the text inside the string.
+    JavaScript reads those back as the same three characters, so the
+    chart labels look no different.
+    """
+    return json.dumps(value).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+# Chart.js is the report's one outside file, so it's pinned to an exact
+# release and carries its hash. The browser checks the hash and refuses a
+# file that doesn't match, so a changed or tampered copy on the CDN can't
+# run inside a report that's attached to a ticket. To move to a newer
+# release, change the version and recompute the hash from the real file:
+#   curl -sL <CHART_JS_URL> | openssl dgst -sha384 -binary | openssl base64 -A
+CHART_JS_URL = "https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
+CHART_JS_INTEGRITY = "sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
+
+DEVICE_CAPTURE_CATEGORY = "Device capture"
+
+
+def device_problem_finding(problem):
+    """One failed, missing, or new device as an Action Required finding.
+
+    It's the same finding shape every parser produces, so it rolls into
+    the verdict, the attention list, and the charts through the same
+    path. The connect error from the FAILED file rides along as detail.
+    """
+    subject = [problem["name"]]
+
+    if problem["address"] and problem["address"] != problem["name"]:
+        subject.append(problem["address"])
+
+    return {
+        "classification": "System",
+        "category": DEVICE_CAPTURE_CATEGORY,
+        "impact": "Action Required",
+        "title": problem["title"],
+        "subject": subject,
+        "fields": [("Capture", problem["before"], problem["after"])],
+        "summary": problem["summary"],
+        "evidence": problem["evidence"],
+        "detail": [("context", line) for line in problem["detail"]],
+    }
 
 
 def clean_line_for_compare(command, line):
@@ -1669,9 +1710,11 @@ def analyze(precheck_folder, postcheck_folder, pairs=None):
     pairs: optional explicit [[host, host], ...] from the inventory; pairs
     whose hostnames differ only by a trailing number are inferred anyway.
     """
-    pre_files = sorted(os.listdir(precheck_folder))
-    post_files = sorted(os.listdir(postcheck_folder))
-    common_files = sorted(set(pre_files) & set(post_files))
+    # common_files are captured in both runs and get the full analysis.
+    # Devices that failed, went missing, or are new come back as
+    # problems and are added in pass 3 as Action Required findings.
+    common_files, problems = captures.device_problems(precheck_folder, postcheck_folder)
+    warnings, _notes = captures.baseline_warnings(precheck_folder, postcheck_folder)
 
     total_findings_by_classification = {
         "Configuration": 0,
@@ -1808,6 +1851,34 @@ def analyze(precheck_folder, postcheck_folder, pairs=None):
             "impact_score": device_impact_score,
         })
 
+    # A device with no usable capture on one side. It was kept out of
+    # passes 1 and 2 (there's nothing to diff or to pair), but it has to
+    # count: "we couldn't check it" must never read as "it's fine".
+    problem_findings = []
+
+    for problem in problems:
+        finding = device_problem_finding(problem)
+        problem_findings.append(finding)
+        devices_with_findings += 1
+        total_findings_by_classification[finding["classification"]] += 1
+        impact_totals[finding["impact"]] += 1
+        window_totals[finding["impact"]] += 1
+
+        device_reports.append({
+            "file_name": problem["file_name"],
+            "device_id": safe_id(problem["file_name"].replace(".txt", "")),
+            "findings": [finding],
+            "config_changes": [],
+            "diffs": {},
+            "raw_categories": classify_raw_diff_commands({}),
+            "findings_count": 1,
+            "attention_count": 0,
+            "action_count": 1,
+            "changed_count": 0,
+            "stable_count": 0,
+            "impact_score": 10,
+        })
+
     device_reports = sorted(
         device_reports,
         key=lambda item: (
@@ -1821,6 +1892,8 @@ def analyze(precheck_folder, postcheck_folder, pairs=None):
 
     return {
         "common_files": common_files,
+        "device_problems": problem_findings,
+        "warnings": warnings,
         "device_reports": device_reports,
         "pairs": resolved_pairs,
         "pair_findings": all_pair_findings,
@@ -1843,6 +1916,8 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, notes_text=
     window_totals = analysis.get("window_totals", impact_totals)
     symmetry_totals = analysis.get("symmetry_totals", dict.fromkeys(impact_totals, 0))
     symmetry_count = sum(symmetry_totals.values())
+    device_problems = analysis.get("device_problems", [])
+    warnings = analysis.get("warnings", [])
 
     # Graded on the window alone. A pair-symmetry finding is a standing
     # condition the window did not create, so it gets its own sentence
@@ -1864,6 +1939,12 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, notes_text=
         assessment_text = "Something changed that you should look at. Click Attention to jump to it."
     else:
         assessment_text = "Something here may need fixing. Click Action Required to jump to it."
+
+    if device_problems:
+        assessment_text = (
+            f"{len(device_problems)} device(s) couldn't be verified: the capture failed or is missing. "
+            "They're listed first, under Devices Not Verified. " + assessment_text
+        )
 
     if symmetry_count:
         assessment_text += (
@@ -1895,6 +1976,27 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, notes_text=
     chart_device_labels = [report["file_name"].replace(".txt", "") for report in device_reports]
     chart_device_impact = [report["impact_score"] for report in device_reports]
 
+    # Shown above everything else, and only when there's something to
+    # say, so a report with nothing wrong is unchanged. Styled inline
+    # for the same reason: no new CSS in every report for a rare block.
+    top_alerts_html = ""
+
+    for warning in warnings:
+        top_alerts_html += (
+            '\n    <div class="attention-card" style="border-left-color: var(--red);">'
+            f'<h2>Warning</h2><p>{html.escape(warning)}</p></div>'
+        )
+
+    if device_problems:
+        top_alerts_html += (
+            '\n    <div id="device-problems" class="attention-card" style="border-left-color: var(--red);">'
+            "<h2>Devices Not Verified</h2>"
+            '<p class="muted">These devices have no usable capture before or after the change, so nothing '
+            "below covers them.</p>"
+            + "".join(render_finding(finding) for finding in device_problems)
+            + "</div>"
+        )
+
     html_parts = []
 
     html_parts.append(f"""
@@ -1903,7 +2005,7 @@ def render_html(ticket, precheck_folder, postcheck_folder, analysis, notes_text=
 <head>
 <meta charset="utf-8">
 <title>{ticket} Maintenance Report</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{CHART_JS_URL}" integrity="{CHART_JS_INTEGRITY}" crossorigin="anonymous"></script>
 <style>
 :root {{
     --panel: rgba(15, 23, 42, 0.92);
@@ -2416,10 +2518,10 @@ details .diff-box {{
     </div>
 </div>
 
-<div class="container">
+<div class="container">{top_alerts_html}
     <div class="cards">
         <a class="card clickable" href="#device-findings"><div class="label">Network Health</div><div class="value health-{overall_health.lower().replace(" ", "-")}">{html.escape(overall_health)}</div></a>
-        <a class="card clickable" href="#device-findings"><div class="label">Devices Checked</div><div class="value">{len(common_files)}</div></a>
+        <a class="card clickable" href="#device-findings"><div class="label">Devices Checked</div><div class="value">{len(common_files) + len(device_problems)}</div></a>
         <a class="card clickable" href="#device-findings"><div class="label">Devices With Findings</div><div class="value">{devices_with_findings}</div></a>
         <a class="card clickable" href="#device-findings"><div class="label">Changed</div><div class="value">{window_totals["Changed"]}</div></a>
         <a class="card clickable" href="#attention-items"><div class="label">Attention</div><div class="value health-attention">{window_totals["Attention"]}</div></a>
@@ -2617,15 +2719,20 @@ details .diff-box {{
 </div>
 
 <script>
-const healthLabels = {json.dumps(chart_impact_labels)};
-const healthValues = {json.dumps(chart_impact_values)};
+const healthLabels = {script_json(chart_impact_labels)};
+const healthValues = {script_json(chart_impact_values)};
 
-const categoryLabels = {json.dumps(chart_classification_labels)};
-const categoryValues = {json.dumps(chart_classification_values)};
+const categoryLabels = {script_json(chart_classification_labels)};
+const categoryValues = {script_json(chart_classification_values)};
 
-const deviceLabels = {json.dumps(chart_device_labels)};
-const deviceImpact = {json.dumps(chart_device_impact)};
+const deviceLabels = {script_json(chart_device_labels)};
+const deviceImpact = {script_json(chart_device_impact)};
 
+if (typeof Chart === "undefined") {{
+    document.querySelectorAll(".chart-wrap").forEach(function (wrap) {{
+        wrap.innerHTML = '<p class="muted">Charts are not shown because Chart.js could not be loaded from the CDN. Everything else in this report is complete.</p>';
+    }});
+}} else {{
 Chart.defaults.color = "#cbd5e1";
 Chart.defaults.borderColor = "rgba(148, 163, 184, 0.18)";
 Chart.defaults.font.family = "Segoe UI, Arial, sans-serif";
@@ -2709,6 +2816,7 @@ new Chart(document.getElementById("deviceImpactChart"), {{
         }}
     }}
 }});
+}}
 </script>
 
 </body>
@@ -2740,6 +2848,21 @@ def build_html_report(ticket, dirs, run_timestamp, console, pairs=None, notes_te
     html_report = os.path.join(dirs["compare"], f"compare_{run_timestamp}.html")
 
     analysis = analyze(precheck_folder, postcheck_folder, pairs=pairs)
+    _warnings, console_notes = captures.baseline_warnings(precheck_folder, postcheck_folder)
+
+    for warning in analysis["warnings"]:
+        console.print(f"[bold red]WARNING:[/bold red] {warning}", highlight=False)
+
+    for note in console_notes:
+        console.print(f"Note: {note}", highlight=False)
+
+    if analysis["device_problems"]:
+        console.print(
+            f"[bold red]ACTION REQUIRED:[/bold red] {len(analysis['device_problems'])} device(s) could not be "
+            "verified: " + ", ".join(finding["subject"][0] for finding in analysis["device_problems"]),
+            highlight=False,
+        )
+
     page = render_html(ticket, precheck_folder, postcheck_folder, analysis, notes_text=notes_text)
 
     with open(html_report, "w", encoding="utf-8") as file:

@@ -238,8 +238,8 @@ def _write(folder, hostname, prefix_lines):
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{hostname}.txt").write_text(
         f"Hostname: {hostname}\n"
-        "### show ip prefix-list ###\n" + "\n".join(prefix_lines) + "\n"
-        "### show running-config ###\n"
+        "### show ip prefix-list ###\n--------------------------------------------------------------------------------\n" + "\n".join(prefix_lines) + "\n"
+        "### show running-config ###\n--------------------------------------------------------------------------------\n"
         f"hostname {hostname}\n"
     )
 
